@@ -1,1 +1,31 @@
-Oh, hello world
+Megalon is intended to be an approximate clone of Google's Megastore database 
+for geographically-distributed scalable fault-tolerant consistent data storage.
+
+The paper describing Megastore can be found at:
+  http://www.cidrdb.org/cidr2011/Papers/CIDR11_Paper32.pdf
+
+The Megastore paper authors are Jason Baker, Chris Bond, James C. Corbett, 
+JJ Furman, Andrey Khorlin, James Larson, Jean-Michel Leon, Yawei Li, Alexander 
+Lloyd, and Vadim Yushprakh. All the credit for the interesting protocols goes
+to them.
+
+The database is broken up into small pieces called entity groups. ACID
+transactions can be run within a single entity group. Each entity group has
+a replicated write-ahead log that clients append to using the Paxos
+distributed agreement protocol.
+
+This design solves (sort of) the throughput scaling problems of more 
+traditional databases that allow transactions over the entire database. The 
+Megastore design is not suitable for all applications, though. Round-trip
+latency is incurred on writes, and we make the assumption that the chance
+of contention is small for any given entity group.   
+
+HBase is used for the underlying data storage due to its similarity to
+BigTable. The key feature is MVCC, so clients can read old values while new
+values are being written.
+
+Right now megalon is an academic curiosity. If I can avoid screwing it up it 
+may someday be fit for production use.
+
+-Dave Revell
+
