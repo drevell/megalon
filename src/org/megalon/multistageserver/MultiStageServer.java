@@ -168,6 +168,7 @@ public class MultiStageServer {
 			SocketChannel acceptedChan = servChan.accept();
 			InetSocketAddress remoteAddr = (InetSocketAddress)
 			   acceptedChan.socket().getRemoteSocketAddress();
+			logger.debug("New connection from " + remoteAddr);
 			ReqMetaData work = new ReqMetaData(remoteAddr, acceptedChan);
 			StageRunner firstStage = new StageRunner(work, startStage, stages, 
 					executors);
