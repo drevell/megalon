@@ -1,0 +1,28 @@
+---
+
+global:
+    # Where to store megalon's data inside Zookeeper
+    zk_base_path:   /megalon
+
+    replicas:
+        -   name:   west
+            hbase:  ["127.0.0.1:9210"]
+            coord:  ["127.0.0.1:35791"]
+            replsrv: ["127.0.0.1:35792"]
+            zk:     ["127.0.0.1:35793"]
+                
+        #-   name:   east
+        #-   name:   north
+        #-   name:   south
+
+node:
+    # Which replica does this node belong to?
+    repl_name:  west
+    
+    # Should this node run the replication server component?
+    run_replsrv: true
+    replsrv_port: 35792
+
+    # Should this node run the coordinator component?
+    run_coord:  true
+    coord_port: 35791
