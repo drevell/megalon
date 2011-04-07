@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.log4j.Logger;
+import org.megalon.Coord.CoordStatus;
+import org.megalon.Proposer.ProposerStatus;
+import org.megalon.ReplServer.ReplServerStatus;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.scanner.ScannerException;
 
@@ -28,6 +31,10 @@ public class Config {
 	int replsrv_port = 35792;
 	boolean run_coord = false;
 	int coord_port = 35791;
+	
+	CoordStatus coordStatus = new CoordStatus();
+	ProposerStatus propStatus = new ProposerStatus();
+	ReplServerStatus replSrvStatus = new ReplServerStatus();
 	
 	ReplicaDesc myReplica;
 	Map<String,ReplicaDesc> replicas;

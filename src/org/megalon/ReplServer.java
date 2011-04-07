@@ -1,17 +1,16 @@
 package org.megalon;
 
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.log4j.Logger;
 import org.megalon.multistageserver.MultiStageServer;
-import org.megalon.multistageserver.MultiStageServer.ReqMetaData;
-import org.megalon.multistageserver.MultiStageServer.Stage;
 import org.megalon.multistageserver.MultiStageServer.StageDesc;
+import org.megalon.multistageserver.SocketAccepter;
 
 public class ReplServer extends Thread {
 	public static final int CONCURRENT_CLIENTS = 1000;
+	public static final int STAGE_ID = 1;
 	static Logger logger = Logger.getLogger(ReplServer.class);
 	Config conf;
 	
@@ -21,27 +20,35 @@ public class ReplServer extends Thread {
 	
 	public void run() {
 		logger.debug("Replication server starting");
-//		logger.debug("My yaml is: " + yaml.toString() + ", type: " + 
-//				yaml.getClass().getName());
 		
-		MultiStageServer server = new MultiStageServer(logger);
-		StageDesc stageDesc = new StageDesc(CONCURRENT_CLIENTS, 
+		Map<Integer,StageDesc<MPayload>> stages = 
+			new HashMap<Integer,StageDesc<MPayload>>();
+		StageDesc<MPayload> stageDesc = new StageDesc<MPayload>(CONCURRENT_CLIENTS, 
 				new ReplServerStage(), "repl_server");
-		Map<Integer,StageDesc> stages = new HashMap<Integer,StageDesc>();
-		stages.put(0, stageDesc);
-		
+		stages.put(STAGE_ID, stageDesc);
+		MultiStageServer<MPayload> server = 
+			new MultiStageServer<MPayload>(stages, logger);
+		SocketAccepter<MPayload> accepter = new MSocketAccepter(server,
+				null, conf.replsrv_port, STAGE_ID);
 		try {
-			server.runForever(null, conf.replsrv_port, stages, 0);
-		} catch(IOException e) {
-			logger.warn("Repl server had an IOException!", e);
+			accepter.runForever();
+		} catch(Exception e) {
+			logger.warn("Repl server had an Exception!", e);
 		}
 	}
 	
-	class ReplServerStage implements MultiStageServer.Stage {
+	class ReqState {
+		 
+	}
+	
+	class ReplServerStage implements MultiStageServer.Stage<MPayload> {
 		@Override
-		public int runStage(ReqMetaData work) throws Exception {
-			
+		public int runStage(MPayload payload) throws Exception {
 			return 0;
 		}
+	}
+	
+	public static class ReplServerStatus {
+		
 	}
 }

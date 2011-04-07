@@ -1,9 +1,5 @@
 package org.megalon.multistageserver;
 
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -33,40 +29,164 @@ import org.apache.log4j.Logger;
  * SEDA architecture. It also looks a lot like the Apache Cassandra 
  * interpretation of SEDA.
  */
-public class MultiStageServer {
+public class MultiStageServer<T extends MultiStageServer.Payload> {
 	protected Logger logger;
-	protected Thread daemonThread = null;
-	protected ServerSocketChannel servChan; 
-	protected boolean intentionalStop;
+	protected Map<Integer,StageDesc<T>> stages; 
+	protected Map<Integer,ThreadPoolExecutor> execs;
+	protected ThreadPoolExecutor finisherExec;
+	boolean inited = false;
+	
 	/**
-	 * Construct using the default logger.
+	 * Construct using the default logger. This just wraps a call to init().
 	 */
-	public MultiStageServer() {
-		this(null);
+	public MultiStageServer(Map<Integer,StageDesc<T>> stages) {
+		this(stages, null);
 	}
 	
 	/**
-	 * Construct using a specified logger instead of the default.
+	 * Construct using a specified logger instead of the default. This just
+	 * wraps a call to init().
 	 */
-	public MultiStageServer(Logger logger) {
+	public MultiStageServer(Map<Integer,StageDesc<T>> stages, Logger logger) {
+		init(stages, null, logger);
+	}
+	
+	/**
+	 * No-arg constructor. If you use this, you must explicitly initialize the
+	 * server by calling init() before it will be usable.
+	 */
+	public MultiStageServer() { }
+	
+	/**
+	 * Configure the server. This is required before the server can accept
+	 * tasks via enqueue(). This function may be called for you by a 
+	 * constructor.
+	 * 
+	 * @param stages a description of the server. The server is represented
+	 * as a directed graph of Stage objects. Each stage has a unique integer ID
+	 * and is described by a StageDesc object. So by passing a map of
+	 * integer->StageDesc to this function, you completely define a server.
+	 * @param finisherExec if payload objects have a non-null payload.finisher,
+	 * then finisherExec specifies an executor that should run the finisher. For
+	 * example, a socket server may want to set up an finisher executor that
+	 * will send the server results over the socket and close it. If the caller
+	 * passes null for the finisher, the server will set up a ThreadPoolExecutor
+	 * internally with a small number of threads to run the payload finishers. 
+	 */
+	public void init(Map<Integer,StageDesc<T>> stages, ThreadPoolExecutor 
+			finisherExec, Logger logger) {
 		if(logger == null) {
 			this.logger = Logger.getLogger(MultiStageServer.class);
 		} else {
 			this.logger = logger;
 		}
 		if(this.logger == null) {
-			throw new AssertionError("doh");
+			throw new AssertionError("Null logger... d'oh");
+		}
+		
+		this.stages = stages;
+		this.execs = setupExecutors(stages);
+		if(finisherExec != null) {
+			this.finisherExec = finisherExec;
+		} else {
+			this.finisherExec = new ThreadPoolExecutor(1, 3, 100, 
+					TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>());
+		}
+		inited = true;
+	}
+	
+	/**
+	 * A wrapper around init() that uses the default logger.
+	 */
+	public void init(Map<Integer,StageDesc<T>> stages) {
+		init(stages, null, null);
+	}
+	
+	/**
+	 * This is the parent class for objects that are passed between the stages
+	 * of the server. They contain request state.
+	 */
+	static public class Payload {
+		private boolean isFinished = false;
+		public SocketChannel sockChan;
+		public Throwable throwable;
+		@SuppressWarnings("rawtypes")
+		public Finisher finisher;
+		
+		public Payload(SocketChannel sockChan) {
+			this(sockChan, null);
+		}
+		
+		public Payload(SocketChannel sockChan, 
+				@SuppressWarnings("rawtypes") Finisher finisher) {
+			this.sockChan = sockChan;
+			this.finisher = finisher;
+		}
+		
+		/**
+		 * Block until all server stages have finished processing.
+		 */
+		synchronized public void waitFinished() {
+			while(!isFinished) {
+				try {
+					wait();
+				} catch (InterruptedException e) {}
+			}
+		}
+		
+		/**
+		 * Called by a StageRunner when the final stage is done to indicate
+		 * completion. 
+		 * @param e any exception that may have occurred in the last stage
+		 */
+		synchronized void setFinished(Throwable e) {
+			this.isFinished = true;
+			this.throwable = e;
+			notifyAll();
+		}
+
+		/** 
+		 * Called by StageRunner to indicate error-free completion of server
+		 * processing.
+		 */
+		void setFinished() {
+			setFinished(null);
+		}
+
+	}
+
+	public interface Finisher<T extends Payload> {
+		/**
+		 * Called when a server has finished processing a request.
+		 * @param p the request payload, possibly containing server results
+		 */
+		void finish(T payload);
+	}
+
+	
+	public boolean enqueue(T payload, int startStage) {
+		if(!inited) {
+			logger.warn("Enqueue attempt for un-inited server");
+			return false;
+		}
+		StageRunner sr = new StageRunner(startStage, payload);
+		ThreadPoolExecutor exec = execs.get(startStage);
+		if(exec == null) {
+			return false;
+		} else {
+			exec.execute(sr);
+			return true;
 		}
 	}
 	
 	/**
 	 * A simple struct that describes one of the stages inside a staged server.
 	 */
-	public static class StageDesc {
+	public static class StageDesc<T extends Payload> {
 		protected int numConcurrent;
-		protected Stage stage;
+		protected Stage<T> stage;
 		protected String name;
-		public StageDesc(int numConcurrent, Stage stage, String name) {
+		public StageDesc(int numConcurrent, Stage<T> stage, String name) {
 			this.numConcurrent = numConcurrent;
 			this.stage = stage;
 			this.name = name;
@@ -74,7 +194,7 @@ public class MultiStageServer {
 		public int getNumConcurrent() {
 			return numConcurrent;
 		}
-		public Stage getStage() {
+		public Stage<T> getStage() {
 			return stage;
 		}
 		public String getName() {
@@ -86,50 +206,25 @@ public class MultiStageServer {
 	 * All server stages should implement this interface.
 	 * For instance, AuthenticateStage, HandshakeStage, FlushStage, etc.
 	 */
-	public interface Stage {
+	public interface Stage<T> {
 		/**
 		 * Classes that implement this interface should implement this method
 		 * to do whatever actual work takes place in that stage. For example,
 		 * a stage might write data to disk or send a message to the client.
 		 * 
 		 * @return the integer ID of the next state to be entered for this
-		 * request.
+		 * request, or -1 to halt cleanly.
 		 */
-		public abstract int runStage(ReqMetaData work) throws Exception;
+		public abstract int runStage(T payload) throws Exception;
 	}
 	
-	/**
-	 * Represents the saved state of a client or request as it moves through 
-	 * the server stages.
-	 */
-	public static class ReqMetaData {
-		protected InetSocketAddress remoteAddr;
-		protected SocketChannel sockChan;
-		protected Object payload;
-		public ReqMetaData(InetSocketAddress remoteAddr, SocketChannel sockChan) {
-			this.remoteAddr = remoteAddr;
-			this.sockChan = sockChan;
-		}
-		public InetSocketAddress getRemoteAddr() {
-			return remoteAddr;
-		}
-		public SocketChannel getSockChan() {
-			return sockChan;
-		}
-		public Object getPayload() {
-			return payload;
-		}
-		public void setPayload(Object payload) {
-			this.payload = payload;
-		}
-	}
-	
-	protected Map<Integer,ThreadPoolExecutor> setupExecutors(Map<Integer,StageDesc> stages) {
+	protected Map<Integer,ThreadPoolExecutor> setupExecutors(
+			Map<Integer,StageDesc<T>> stages) {
 		// For each server stage, set up a thread pool and queue of pending work
 		Map<Integer,ThreadPoolExecutor> stageExecutors = 
 				new ConcurrentHashMap<Integer, ThreadPoolExecutor>();
-		for(Map.Entry<Integer,StageDesc> e : stages.entrySet()) {
-			StageDesc stageDesc = e.getValue();
+		for(Map.Entry<Integer,StageDesc<T>> e : stages.entrySet()) {
+			StageDesc<T> stageDesc = e.getValue();
 			int stageIdNum = e.getKey();
 			
 			BlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>();
@@ -141,122 +236,6 @@ public class MultiStageServer {
 	}
 	
 	/**
-	 * Start serving clients. Won't return unless there's an exception when 
-	 * listening or accepting connections.
-	 * @param addr the IP address to listen to
-	 * @param port the TCP port to listen to
-	 * @param stages A mapping from int->StageDesc. This associates each stage 
-	 * with a unique integer ID. Mapping to a value of null is interpreted as
-	 * an "end state," causing the connection to be closed.
-	 * @param startStage The ID of the stage that should be entered for new clients.
-	 */
-	public void runForever(InetAddress addr, int port, 
-			Map<Integer,StageDesc> stages, int startStage)throws IOException {
-		Map<Integer,ThreadPoolExecutor> stageExecutors = setupExecutors(stages);
-		
-		// Bind to the desired IP/port
-		servChan = ServerSocketChannel.open();
-		servChan.socket().bind(new InetSocketAddress(addr, port));
-		acceptLoop(servChan, startStage, stageExecutors, stages);
-	}
-		
-	protected void acceptLoop(ServerSocketChannel servChan, int startStage, 
-			Map<Integer,ThreadPoolExecutor> executors,
-			Map<Integer,StageDesc> stages) throws IOException {
-		// Loop forever, accepting and running the first stage
-		while(true) {
-			SocketChannel acceptedChan = servChan.accept();
-			InetSocketAddress remoteAddr = (InetSocketAddress)
-			   acceptedChan.socket().getRemoteSocketAddress();
-			logger.debug("New connection from " + remoteAddr);
-			ReqMetaData work = new ReqMetaData(remoteAddr, acceptedChan);
-			StageRunner firstStage = new StageRunner(work, startStage, stages, 
-					executors);
-			if(firstStage.enqueue() == false) {
-				String errMsg = "The start stage (id " + startStage
-						+ ") wasn't defined";
-				logger.warn(errMsg);
-				throw new AssertionError(errMsg);
-			}
-		}
-	}
-	
-	/**
-	 * Starts a new thread that will accept connections. This function will return
-	 * as soon as the socket bind() completes sucessfully.
-	 * @param addr
-	 * @param port
-	 * @param stages
-	 * @param startStage
-	 * @return
-	 */
-	synchronized public boolean runBackground(InetAddress addr, int port, 
-			Map<Integer,StageDesc> stages, int startStage) throws IOException {
-		class DaemonRunner implements Runnable {
-			ServerSocketChannel servChan;
-			int startStage; 
-			Map<Integer,ThreadPoolExecutor> executors;
-			Map<Integer,StageDesc> stages;
-			
-			public DaemonRunner(ServerSocketChannel servChan, int startStage, 
-					Map<Integer,ThreadPoolExecutor> executors,
-					Map<Integer,StageDesc> stages) {
-				this.servChan = servChan;
-				this.startStage = startStage;
-				this.executors = executors;
-				this.stages = stages;
-			}
-			public void run() {
-				try {
-					acceptLoop(servChan, startStage, executors, stages);
-				} catch (IOException e) {
-					if(!intentionalStop) {
-						logger.warn("Exception in listening socket", e);
-					} else {
-						logger.trace("Intentional background daemon stop");
-					}
-				}
-			}
-		}
-		
-		Map<Integer,ThreadPoolExecutor> stageExecutors = setupExecutors(stages);
-		
-		// Bind to the desired IP/port
-		servChan = ServerSocketChannel.open();
-		servChan.socket().bind(new InetSocketAddress(addr, port));
-		
-		if(daemonThread != null) {
-			logger.warn("Tried to runBackground but server was already running");
-			return false;
-		}
-		intentionalStop = false;
-		daemonThread = new Thread(new DaemonRunner(servChan, startStage, 
-				stageExecutors, stages));
-		daemonThread.start();
-		return true;
-	}
-	
-	synchronized public void stopBackground() {
-		intentionalStop = true;
-		try {
-			logger.debug("Stopping backgrounded server");
-			System.out.println("1");
-			servChan.close();
-			logger.trace("Listening channel closed, waiting for thread");
-			System.out.println("2");
-			daemonThread.join();
-			logger.trace("Listening channel closed");
-			System.out.println("3");
-			daemonThread = null;
-		} catch (Exception e) {
-			System.out.println("4");
-			e.printStackTrace();
-			logger.warn("Exception in stopBackground when closing listen socket", e);
-		}
-	}
-		
-	
-	/**
 	 * RunStage is a runnable that will be placed in an executor queue. When a 
 	 * thread takes it off the queue and runs it, it will run the single stage
 	 * that was provided to the constructor. When it has finished running that
@@ -264,15 +243,11 @@ public class MultiStageServer {
 	 * request. The request will be passed on to the queue for the next stage. 
 	 */
 	class StageRunner implements Runnable {
-		protected Map<Integer,StageDesc> stageDescs;
-		protected ReqMetaData work;
-		protected Map<Integer,ThreadPoolExecutor> execs;
 		protected int stageToRun;
-		public StageRunner(ReqMetaData work, int stageToRun, Map<Integer,StageDesc> stageDescs, Map<Integer,ThreadPoolExecutor> execs) {
-			this.work = work;
+		T payload;
+		public StageRunner(int stageToRun, T payload) {
 			this.stageToRun = stageToRun;
-			this.stageDescs = stageDescs;
-			this.execs = execs;
+			this.payload = payload;
 		}
 		
 		/**
@@ -286,33 +261,53 @@ public class MultiStageServer {
 				nextStageExecutor.execute(this);
 				return true;
 			} else {
-				close();
 				return false;
 			}
 		}
-		
-		protected void close() {
-			try {
-				work.sockChan.close();
-			} catch (IOException e) {}
-		}
-		
+
 		/**
 		 * Once the ThreadPoolExecutor has an available thread, this will be 
 		 * called. It will execute the stage and enqueue a work unit for the 
 		 * next stage if another stage is indicated.
 		 */
 		public void run() {
-			Stage curStage = stageDescs.get(stageToRun).getStage();
+			Stage<T> curStage = stages.get(stageToRun).getStage();
+			Exception errException = null;
 			try {
-				int nextStageId = curStage.runStage(work);
-				StageRunner nextRunStage = new StageRunner(work, nextStageId, stageDescs, execs);
-				nextRunStage.enqueue();
+				stageToRun = curStage.runStage(payload);
+				// TODO prevent reordering of memory ops between stages?
+
+				if(stageToRun == -1) {
+					logger.debug("Request stopping cleanly.");
+				} else if(!enqueue()) {
+					errException = new Exception(
+							"enqueue failed, no such stage " + stageToRun);
+				}
 			} catch (Exception e) {
 				e.printStackTrace();
-				logger.warn("Closing socket due to exception in stage: " + 
-						stageDescs.get(stageToRun).getName());
-				close();
+				errException = new Exception("Exception in stage: " + 
+						stages.get(stageToRun).getName(), e);
+				stageToRun = -1;
+
+			}
+
+			if(errException != null) {
+				logger.warn("Exception in StageRunner", errException);
+			}
+			
+			// Trigger the two post-processing mechanisms, finishers and 
+			// waiters, in that order.
+			if(stageToRun == -1) {
+				if(payload.finisher != null) {
+					Runnable finishRunner = new Runnable() {
+						@SuppressWarnings("unchecked")
+						public void run() {
+							payload.finisher.finish(payload);
+						}
+					};
+					finisherExec.execute(finishRunner);
+				}
+				payload.setFinished(errException);
 			}
 		}
 	}
