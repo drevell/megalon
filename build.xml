@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project basedir="." default="build" name="megalon">
+    <property environment="env"/>
+    <property name="debuglevel" value="source,lines,vars"/>
+    <property name="target" value="1.6"/>
+    <property name="source" value="1.6"/>
+    
+    <!-- Lots of this closely resembles Patrick Hunt's example
+         https://github.com/phunt/avro-rpc-quickstart/blob/master/build.xml -->
+    <property name="build.dir" value="${basedir}/bin" />
+    <property name="lib.dir" value="${basedir}/lib" />
+    <property name="java.src.dir" value="${basedir}/src/java" />
+    <property name="avro.schema.dir" value="${basedir}/src/avro" />
+    <property name="avro.generated.dir" value="${build.dir}/generated-sources/avro" />
+    <property name="build.classes" value="${build.dir}/classes" />
+
+    <property name="ivy.install.version" value="2.2.0" />
+    <condition property="ivy.home" value="${env.IVY_HOME}">
+        <isset property="env.IVY_HOME" />
+    </condition>
+    <property name="ivy.home" value="${user.home}/.ant" />
+    <property name="ivy.jar.dir" value="${ivy.home}/lib" />
+    <property name="ivy.jar.file" value="${ivy.jar.dir}/ivy.jar" />
+
+    <path id="megalon.classpath">
+        <pathelement location="${build.classes}"/>
+        <fileset dir="${lib.dir}">
+            <include name="**/*.jar"/>
+        </fileset>
+        <fileset dir="${ant.home}/lib">
+            <include name="ant.jar"/>
+        </fileset>
+    </path>
+    
+    <target name="init">
+        <mkdir dir="${build.dir}"/>
+        <mkdir dir="${java.src.dir}"/>
+        <mkdir dir="${avro.generated.dir}"/>
+        <mkdir dir="${build.classes}"/> 
+        <tstamp>
+            <format property="build.time" pattern="MM/dd/yyyy HH:mm zz" timezone="GMT"/>
+            <format property="year" pattern="yyyy" timezone="GMT"/>
+        </tstamp>        
+    </target>
+   
+    <target name="ivy-deps" depends="init,init-ivy" >
+        <ivy:retrieve xmlns:ivy="antlib:org.apache.ivy.ant" type="jar" 
+                      pattern="${lib.dir}/[artifact]-[revision].[ext]" />
+    </target>
+
+    <target name="clean">
+        <delete dir="${build.dir}"/>
+    </target>
+    
+    <target name="build" depends="build-project,compile-generated"/>
+    
+    <target name="build-project" depends="init">
+        <echo message="${ant.project.name}: ${ant.file}"/>
+        <javac debug="true" debuglevel="${debuglevel}" destdir="${build.classes}" 
+               source="${source}" target="${target}">
+            <src path="${java.src.dir}"/>
+            <classpath refid="megalon.classpath"/>
+        </javac>
+    </target>
+    
+    <target name="compile-generated" depends="generate-avro">
+        <javac debug="true" debuglevel="${debuglevel}" destdir="${build.classes}" 
+               source="${source}" target="${target}">
+            <src path="${avro.generated.dir}"/>
+            <classpath refid="megalon.classpath"/>
+        </javac>
+        <!-- phunt does paranamer here, is it needed? -->
+    </target>
+
+    <target name="generate-avro" depends="init,ivy-deps">
+
+        <taskdef name="protocol" classname="org.apache.avro.compiler.specific.ProtocolTask">
+            <classpath refid="megalon.classpath" />
+        </taskdef>
+        <protocol destdir="${avro.generated.dir}" >
+            <fileset dir="${avro.schema.dir}" >
+                <include name="**/*.avpr" />
+            </fileset>
+        </protocol>
+    </target>
+
+    <target name="download-ivy" unless="offline">
+        <mkdir dir="${ivy.jar.dir}"/>
+        <!-- download Ivy from web site so that it can be used even without any special installation -->
+        <get src="http://repo2.maven.org/maven2/org/apache/ivy/ivy/${ivy.install.version}/ivy-${ivy.install.version}.jar" 
+             dest="${ivy.jar.file}" usetimestamp="true"/>
+    </target>
+
+    <target name="init-ivy" depends="download-ivy">
+      <!-- try to load ivy here from ivy home, in case the user has not already dropped
+              it into ant's lib dir (note that the latter copy will always take precedence).
+              We will not fail as long as local lib dir exists (it may be empty) and
+              ivy is in at least one of ant's lib dir or the local lib dir. -->
+        <path id="ivy.lib.path">
+            <fileset dir="${ivy.jar.dir}" includes="*.jar"/>
+
+        </path>
+        <taskdef resource="org/apache/ivy/ant/antlib.xml"
+                 uri="antlib:org.apache.ivy.ant" classpathref="ivy.lib.path"/>
+    </target>
+</project>
