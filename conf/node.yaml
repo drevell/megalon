@@ -1,0 +1,15 @@
+---
+
+node:
+    # Which replica does this node belong to?
+    repl_name:  west
+    
+    # Should this node run the replication server component?
+    run_replsrv: true
+    repsrv_listen: true
+    replsrv_port: 35792
+
+    # Should this node run the coordinator component?
+    run_coord:  true
+    coord_listen: true
+    coord_port: 35791

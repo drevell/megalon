@@ -6,23 +6,18 @@ global:
 
     replicas:
         -   name:   west
-            hbase:  ["127.0.0.1:9210"]
-            coord:  ["127.0.0.1:35791"]
-            replsrv: ["127.0.0.1:35792"]
-            zk:     ["127.0.0.1:35793"]
+            hbase:  ["holmes:9210"]
+            coord:  ["holmes:35791"]
+            replsrv: ["holmes:35792"]
+            zk:     ["holmes:35793"]
                 
-        #-   name:   east
+        -   name:   east
+            hbase:  ["holmes:9210"]
+            coord:  ["meg1:35791"]
+            replsrv: ["meg1:35791"]
+            zk:     ["meg1:35793"]
+
+
         #-   name:   north
         #-   name:   south
 
-node:
-    # Which replica does this node belong to?
-    repl_name:  west
-    
-    # Should this node run the replication server component?
-    run_replsrv: true
-    replsrv_port: 35792
-
-    # Should this node run the coordinator component?
-    run_coord:  true
-    coord_port: 35791

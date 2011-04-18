@@ -3,7 +3,7 @@
     <dependencies>
         <dependency org="org.apache.avro" name="avro-tools" rev="1.5.0"/>
         <dependency org="commons-cli" name="commons-cli" rev="1.2"/>
-        <dependency org="log4j" name="log4j" rev="1.2.16"/>
         <dependency org="org.yaml" name="snakeyaml" rev="1.8"/>
+        <dependency org="commons-logging" name="commons-logging" rev="1.1.1"/>
     </dependencies>
 </ivy-module>

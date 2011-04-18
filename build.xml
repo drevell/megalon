@@ -34,6 +34,7 @@
     
     <target name="init">
         <mkdir dir="${build.dir}"/>
+        <mkdir dir="${lib.dir}"/>
         <mkdir dir="${java.src.dir}"/>
         <mkdir dir="${avro.generated.dir}"/>
         <mkdir dir="${build.classes}"/> 
@@ -52,9 +53,9 @@
         <delete dir="${build.dir}"/>
     </target>
     
-    <target name="build" depends="build-project,compile-generated"/>
+    <target name="build" depends="build-project"/>
     
-    <target name="build-project" depends="init">
+    <target name="build-project" depends="init,compile-generated">
         <echo message="${ant.project.name}: ${ant.file}"/>
         <javac debug="true" debuglevel="${debuglevel}" destdir="${build.classes}" 
                source="${source}" target="${target}">
@@ -72,7 +73,7 @@
         <!-- phunt does paranamer here, is it needed? -->
     </target>
 
-    <target name="generate-avro" depends="init,ivy-deps">
+    <target name="generate-avro" depends="ivy-deps">
 
         <taskdef name="protocol" classname="org.apache.avro.compiler.specific.ProtocolTask">
             <classpath refid="megalon.classpath" />

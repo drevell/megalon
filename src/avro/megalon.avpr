@@ -1,0 +1,89 @@
+{
+    "namespace": "org.megalon.avro",
+    "protocol": "AvroPaxosProto",
+
+    "types": [
+        {
+            "name": "AvroWALEntryStatus",
+            "type": "enum",
+            "symbols": ["PREPARED", "ACCEPTED", "CHOSEN"]
+        },
+        {
+            "name": "AvroAckOrNack",
+            "type": "enum",
+            "symbols": ["ACK", "NACK"]
+        },
+        {
+            "name": "AvroWriteVal",
+            "type": "record",
+            "fields": [
+                // TODO optimize by removing table and cf name when possible
+                {"name": "table", "type":  "bytes"},
+                {"name": "cf", "type": "bytes"},
+                {"name": "col", "type": "bytes"},
+                {"name": "value", "type": "bytes"}
+            ]
+        },
+        {
+            "name": "AvroWALEntry",
+            "type": "record",
+            "fields": [
+                {"name": "n", "type": "long"},
+                {"name": "status", "type": "AvroWALEntryStatus"},
+                //{"name": "walIndex", "type": "long"},
+                {"name": "values", "type": [{"type": "array", "items": "AvroWriteVal"}, "null"]}
+            ]
+        },
+
+        // We don't use Avro RPC, but we use the following "messages" to do RPC
+        {
+            "name": "AvroPrepare",
+            "type": "record",
+            "fields": [
+                {"name": "n", "type": "long"},
+                {"name": "reqSerial", "type": "long"},
+                {"name": "walIndex", "type": "long"}
+            ]
+        },
+        {
+            "name": "AvroPrepareResponse",
+            "type": "record",
+            "fields": [
+                {"name": "walEntry", "type": ["null", "AvroWALEntry"]},
+                {"name": "reqSerial", "type": "long"}
+            ]
+        },
+        {   
+            "name": "AvroAccept",
+            "type": "record",
+            "fields": [
+                {"name": "walEntry", "type": "AvroWALEntry"},
+                {"name": "reqSerial", "type": "long"},
+                {"name": "walIndex", "type": "long"}
+            ]
+        },
+        {
+            "name": "AvroAcceptResponse",
+            "type": "record",
+            "fields": [
+                {"name": "reqSerial", "type": "long"},
+                //{"name": "ackOrNack", "type": "AvroAckOrNack"}
+                {"name": "acked", "type": "boolean"}
+            ]
+        }
+    ]
+
+//    "messages": {
+//        "prepare": {
+//            "request": [{"name": "n", "type": "long"}, 
+//                        {"name": "walIndex", "type": "long"}],
+//            "response": ["null", "AvroWALEntry"]
+//        },
+//        "accept": {
+//            "request": [{"name": "state", "type": "AvroWALEntry"}, 
+//                        {"name": "walIndex", "type": "long"}],
+//            "response": "boolean"
+//        }
+    }
+}
+

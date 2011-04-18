@@ -1,9 +1,15 @@
 package org.megalon;
 
+
 public class Coord {
-	
-	
-	public static class CoordStatus {
+	public Coord(Megalon megalon) {
 		
 	}
+
+	public void startSocketAccepter() {
+	}
+	
+//	public static class CoordStatus {
+//		
+//	}
 }

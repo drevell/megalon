@@ -3,16 +3,14 @@ package org.megalon;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.log4j.Logger;
-import org.megalon.Coord.CoordStatus;
-import org.megalon.Proposer.ProposerStatus;
-import org.megalon.ReplServer.ReplServerStatus;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.scanner.ScannerException;
 
@@ -23,25 +21,18 @@ import org.yaml.snakeyaml.scanner.ScannerException;
  * making sure all config values have the correct type. 
  */
 public class Config {
-	File sourceFile;
-	Logger logger = Logger.getLogger(Config.class);
+	Log logger = LogFactory.getLog(Config.class);
 	
 	String zk_path = "/megalon";
 	boolean run_replsrv = false;
+	boolean replsrv_listen = false;
 	int replsrv_port = 35792;
 	boolean run_coord = false;
+	boolean coord_listen = false;
 	int coord_port = 35791;
-	
-	CoordStatus coordStatus = new CoordStatus();
-	ProposerStatus propStatus = new ProposerStatus();
-	ReplServerStatus replSrvStatus = new ReplServerStatus();
 	
 	ReplicaDesc myReplica;
 	Map<String,ReplicaDesc> replicas;
-	
-	public Config(String filename) {
-		this(new File(filename));
-	}
 	
 	public class Host {
 		String nameOrAddr;
@@ -57,32 +48,32 @@ public class Config {
 	 * Parse the configuration from the given YAML file.
 	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-	public Config(File file) {
-		String canonPath;
-		try {
-			canonPath = file.getCanonicalPath();
-		} catch (IOException e) {
-			fail("Couldn't canonicalize config file path: " + 
-					file.getPath());
-			return;
+	public Config(String[] confFileNames) {
+		File[] confFiles = new File[confFileNames.length];
+		for(int i=0; i<confFileNames.length; i++) {
+			confFiles[i] = new File(confFileNames[i]);
 		}
-		logger.debug("Using config file at " + canonPath);
-		sourceFile = file;
+		logger.debug("Config files:" + Arrays.toString(confFileNames));
 		
 		// Process the YAML config file into nested Collections objects
-		Map<String, Object> yamlConf = null; 
-		try {
-			FileInputStream fis = new FileInputStream(file);
-			yamlConf = (Map<String, Object>)new Yaml().load(fis);
-		} catch (FileNotFoundException e) {
-			fail("Couldn't open config file at " + canonPath);
-		} catch (ClassCastException e) {
-			fail("Config seemed to be grossly misformatted.");
-		} catch (ScannerException e) {
-			fail("YAML parse failed, exception " + e.getClass().getName(), e);
+		Map<String, Object> yamlConf = new HashMap<String, Object>();
+		for(File file: confFiles) {
+			logger.debug("Loading config file at " + file.getPath());
+			try {
+				FileInputStream fis = new FileInputStream(file);
+				Map<String, Object> thisFileYaml = 
+					(Map<String, Object>)new Yaml().load(fis);
+				yamlConf.putAll(thisFileYaml);
+			} catch (FileNotFoundException e) {
+				fail("Couldn't open config file at " + file.getPath());
+			} catch (ClassCastException e) {
+				fail("Config seemed to be grossly misformatted.");
+			} catch (ScannerException e) {
+				fail("YAML parse failed, exception " + e.getClass().getName(), e);
+			}
 		}
 		
-		// The config file contains a top-level section named "global"
+		// The config contains a top-level section named "global"
 		Map<String,Object> globalConf = (Map<String,Object>)safeGet(yamlConf, 
 				Map.class, "global", 
 				"Config should have a top-level section \"%k\"" , null);
@@ -146,10 +137,16 @@ public class Config {
 		
 		run_replsrv = (Boolean)safeGet(nodeConf, Boolean.class, "run_replsrv", 
 				"node config should have a boolean \"%k\"", false);
+		replsrv_listen = (Boolean)safeGet(nodeConf, Boolean.class, 
+				"replsrv_listen", "node config should have a boolean \"%k\"", 
+				false);
 		replsrv_port = (Integer)safeGet(nodeConf, Integer.class, "replsrv_port",
 				"node config \"%k\" should have type \"%t\"", 35792);
 		run_coord = (Boolean)safeGet(nodeConf, Boolean.class, "run_coord", 
 				"node config should have a boolean \"%k\"", run_coord);
+		coord_listen = (Boolean)safeGet(nodeConf, Boolean.class, 
+				"coord_listen", "node config should have a boolean \"%k\"", 
+				false);
 		coord_port = (Integer)safeGet(nodeConf, Integer.class, "coord_port",
 				"node config \"%k\" should have type \"%t\"", coord_port);
 		

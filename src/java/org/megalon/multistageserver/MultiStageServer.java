@@ -8,7 +8,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.log4j.Logger;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 /**
  * This class offers a concise way to express a server as a set of "stages."
@@ -30,25 +31,17 @@ import org.apache.log4j.Logger;
  * interpretation of SEDA.
  */
 public class MultiStageServer<T extends MultiStageServer.Payload> {
-	protected Logger logger;
+	protected Log logger = LogFactory.getLog(MultiStageServer.class);
 	protected Map<Integer,StageDesc<T>> stages; 
 	protected Map<Integer,ThreadPoolExecutor> execs;
 	protected ThreadPoolExecutor finisherExec;
 	boolean inited = false;
 	
 	/**
-	 * Construct using the default logger. This just wraps a call to init().
+	 * Constructor that just wraps a call to init().
 	 */
 	public MultiStageServer(Map<Integer,StageDesc<T>> stages) {
-		this(stages, null);
-	}
-	
-	/**
-	 * Construct using a specified logger instead of the default. This just
-	 * wraps a call to init().
-	 */
-	public MultiStageServer(Map<Integer,StageDesc<T>> stages, Logger logger) {
-		init(stages, null, logger);
+		init(stages);
 	}
 	
 	/**
@@ -74,12 +67,7 @@ public class MultiStageServer<T extends MultiStageServer.Payload> {
 	 * internally with a small number of threads to run the payload finishers. 
 	 */
 	public void init(Map<Integer,StageDesc<T>> stages, ThreadPoolExecutor 
-			finisherExec, Logger logger) {
-		if(logger == null) {
-			this.logger = Logger.getLogger(MultiStageServer.class);
-		} else {
-			this.logger = logger;
-		}
+			finisherExec) {
 		if(this.logger == null) {
 			throw new AssertionError("Null logger... d'oh");
 		}
@@ -99,12 +87,18 @@ public class MultiStageServer<T extends MultiStageServer.Payload> {
 	 * A wrapper around init() that uses the default logger.
 	 */
 	public void init(Map<Integer,StageDesc<T>> stages) {
-		init(stages, null, null);
+		init(stages, null);
 	}
 	
 	/**
 	 * This is the parent class for objects that are passed between the stages
 	 * of the server. They contain request state.
+	 * 
+	 * There are two ways to run code after request handling completes. One way
+	 * is to set a "finisher," which is an object implementing finish(payload),
+	 * which will be run after the last server stage completes. The other way
+	 * is to call waitFinished(), which will block the calling thread until
+	 * the server completes and calls notifyAll().
 	 */
 	static public class Payload {
 		private boolean isFinished = false;

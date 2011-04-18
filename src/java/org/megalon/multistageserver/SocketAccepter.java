@@ -6,7 +6,8 @@ import java.net.InetSocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 
-import org.apache.log4j.Logger;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 /**
  * This class listens for incoming connections socket connections. When a new
@@ -24,7 +25,7 @@ public class SocketAccepter<T extends MultiStageServer.Payload> {
 	InetAddress addr;
 	int port;
 	int startStage;
-	Logger logger = Logger.getLogger(SocketAccepter.class);
+	Log logger = LogFactory.getLog(SocketAccepter.class);
 	PayloadFactory<T> payloadFactory;
 	boolean inited = false;
 	
