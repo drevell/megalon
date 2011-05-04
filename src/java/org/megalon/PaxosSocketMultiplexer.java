@@ -1,34 +1,26 @@
 package org.megalon;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.avro.io.BinaryDecoder;
-import org.apache.avro.io.BinaryEncoder;
-import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.DatumWriter;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.io.EncoderFactory;
-import org.apache.avro.specific.SpecificDatumReader;
-import org.apache.avro.specific.SpecificDatumWriter;
+import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.Config.Host;
-import org.megalon.avro.AvroAccept;
-import org.megalon.avro.AvroAcceptResponse;
-import org.megalon.avro.AvroPrepare;
-import org.megalon.avro.AvroPrepareResponse;
-import org.megalon.avro.AvroWALEntry;
-import org.megalon.messages.MegalonMsg;
+import org.megalon.multistageserver.BBInputStream;
 
 /**
  * Normal Avro RPC would have us send a request over a socket, wait for a
@@ -42,37 +34,42 @@ import org.megalon.messages.MegalonMsg;
  * response to a request, it sends a response packet with the same serial 
  * number as the request. The requester can match the response to the request.
  * 
- * TODO more documentation, about waiters?
+ * TODO update documentation
  */
 public class PaxosSocketMultiplexer {
+	public static final int BUFFER_SIZE = 16384;
+	public static final long reconnectAttemptIntervalMs = 5000;
+	Log logger = LogFactory.getLog(PaxosSocketMultiplexer.class);
+	
 	SocketChannel schan;
 	long reqSerial = 0;
 	Host host;
 	String replica;
-	@SuppressWarnings("rawtypes")
-	Map<Long, RespWaiter> waiters = new ConcurrentHashMap<Long, RespWaiter>();
-	Log logger = LogFactory.getLog(PaxosSocketMultiplexer.class);
 	Thread reader;
 	long lastReconnectAttemptTime = 0;
-	public static final long reconnectAttemptIntervalMs = 5000;
+	ByteBufferOutputStream os = new ByteBufferOutputStream();
 	
-	// TODO weak refs to waiters, caller may have given up
-	// TODO non-blocking
-	// TODO shouldn't re-encode for each host
+	Map<Long, MPaxPayload> payloads = new ConcurrentHashMap<Long, MPaxPayload>();
+	PriorityQueue<TimeoutPair> timeoutPq = new PriorityQueue<TimeoutPair>(10, 
+			new TimeoutPair.TPComparator());
 	
-	final DatumWriter<AvroPrepare> prepareWriter = 
-		new SpecificDatumWriter<AvroPrepare>(AvroPrepare.class); 
-	final DatumWriter<AvroAccept> acceptWriter = 
-		new SpecificDatumWriter<AvroAccept>(AvroAccept.class); 
+	LinkedList<ByteBuffer> outBufs = new LinkedList<ByteBuffer>();
+	LinkedList<ByteBuffer> readBuffers = new LinkedList<ByteBuffer>();
+	Selector selector;
+	
+//	class PayloadTimeoutComparator implements Comparator<MPaxPayload> {
+//		public int compare(MPaxPayload p1, MPaxPayload p2) {
+//			return Long.valueOf(p1.finishTimeMs).compareTo(p2.finishTimeMs);
+//		}		
+//	}
 	
 	public PaxosSocketMultiplexer(Host host, String replica) {
 		this.host = host;
 		this.replica = replica;
-		reconnect();
 		reader = new Thread() {
 			public void run() {
 				while(true) {
-					socketReadAndHandle();
+					selectLoop();
 				}
 			}
 		};
@@ -80,172 +77,304 @@ public class PaxosSocketMultiplexer {
 		reader.start();
 	}
 	
-	protected synchronized boolean reconnect() {
-		long nowTimeMs = System.currentTimeMillis();
-		if(lastReconnectAttemptTime + reconnectAttemptIntervalMs < nowTimeMs) {
-			lastReconnectAttemptTime = nowTimeMs; 
-			try {
-				this.schan = SocketChannel.open(new InetSocketAddress(
-						host.nameOrAddr, host.port));
-				logger.debug("Multiplexer connected to " + host);
-				return true;
-			} catch (IOException e) {
-				logger.info("Multiplexer connection to " + host + 
-						" had exception", e);
-			}
-		}
-		return false;
-	}
-	
 	/**
-	 * This is the main function for a thread that sits on a socket connected
-	 * to a Replication Server. When the remote server sends a response to an
-	 * RPC call, this function deserializes the result and passes it to any
-	 * RespWaiter that might be waiting for the response.
+	 * Add a list of ByteBuffers to the pending output queue.
+	 * TODO limit the size of the output buffer
 	 */
-	protected void socketReadAndHandle() {
-		boolean doReconnect = false;
-		if(schan == null || !schan.isConnected()) {
-			doReconnect = true;
-		} else {
-			try {
-				logger.debug("socketReadAndHandle: RPC response listener " +
-						"running for remote host " + host);
-//				InputStream is = schan.socket().getInputStream();
-				BinaryDecoder dec = null;
-				
-				DatumReader<AvroPrepareResponse> prepareRespReader = new 
-					SpecificDatumReader<AvroPrepareResponse>(AvroPrepareResponse.class);
-				DatumReader<AvroAcceptResponse> acceptRespReader = new 
-					SpecificDatumReader<AvroAcceptResponse>(AvroAcceptResponse.class);
-			
-				AvroPrepareResponse prepareResp = new AvroPrepareResponse();
-				AvroAcceptResponse acceptResp = new AvroAcceptResponse();
-				ByteBuffer bufLenBuf = ByteBuffer.allocate(4);
-				while(true) {
-					bufLenBuf.clear();
-					if(schan.read(bufLenBuf) == 0) {
-						continue;
-					}
-					int bufLen = Util.bytesToInt(bufLenBuf.array());
-					// TODO The following allocation prob. causes GC pressure
-					ByteBuffer msgBuf = ByteBuffer.allocate(bufLen);
-					insistRead(msgBuf, bufLen);
-					logger.debug("Incoming bufLen: " + bufLen);
-					
-					ByteArrayInputStream bis = 
-						new ByteArrayInputStream(msgBuf.array());
-					dec = DecoderFactory.get().binaryDecoder(bis, dec);
-					
-					long reqSerial;
-					Object responseObj = null;
-					int msgType = bis.read();
-					logger.debug("Got RPC response msg " + msgType);
-					switch(msgType) {
-					case MegalonMsg.MSG_PREPARE_RESP:
-						prepareResp = prepareRespReader.read(prepareResp, dec);
-						reqSerial = prepareResp.reqSerial;
-						if(prepareResp.walEntry != null) {
-							responseObj = new WALEntry(prepareResp.walEntry);
-						}
-						break;
-					case MegalonMsg.MSG_ACCEPT_RESP:
-						acceptResp = acceptRespReader.read(acceptResp, dec);
-						reqSerial = acceptResp.reqSerial;
-						responseObj = acceptResp.acked;
-						break;
-					default:
-						logger.warn("RPC response was an unrecognized msg type");
-						throw new IOException();
-					}
-	
-					RespWaiter waiter = waiters.get(reqSerial);
-					// waiter may be a soft reference to a GC'ed object
-					if(waiter != null) {
-						waiter.response(replica, responseObj);
-					}
-				}
-			} catch (Exception e) {
-				doReconnect = true;
-				try {
-					schan.close();
-				} catch (IOException ex) {}
-				logger.warn("Exception in RPC socket read, reconnecting", e);
-			}
+	public boolean write(List<ByteBuffer> outBufs, MPaxPayload payload) {
+		if(!ready()) {
+			return false;
 		}
 		
-		if(doReconnect) {
-			if(!reconnect()) {
-				try {
-					Thread.sleep(100); // TODO should backoff
-				} catch (InterruptedException ex) {}
+		long reqSerial = getNextSerial();
+			
+		// Prepend the request serial ID and message length
+		outBufs.add(0, ByteBuffer.wrap(Util.longToBytes(reqSerial)));
+
+		int length = 0;
+		for(ByteBuffer bb: outBufs) {
+			length += bb.remaining();
+			logger.debug("length " + length);
+		}
+		outBufs.add(0, ByteBuffer.wrap(Util.intToBytes(length)));
+		
+		logger.debug("Outgoing bufs: " + RPCUtil.strBufs(outBufs));
+		
+		// Set up the caller to receive the response, when it arrives
+		synchronized(this) {
+			payloads.put(reqSerial, payload);
+			timeoutPq.add(new TimeoutPair(payload.finishTimeMs, reqSerial));
+			this.outBufs.addAll(outBufs); // Add output to queue
+		}
+		
+		// Wake up the selector to send the write
+		selector.wakeup();
+		return true;
+	}
+	
+	/**
+	 * Open (or re-open) a socket connection to the remote replication server.
+	 * This has the side effect of clearing all the state, so all outstanding
+	 * requests will be immediately nacked.
+	 */
+	protected boolean reconnect() {
+		// Throttle reconnection attempts
+//		long nowTimeMs = System.currentTimeMillis();
+//		if(lastReconnectAttemptTime + reconnectAttemptIntervalMs <= nowTimeMs) {
+//			return false;
+//		}
+//		lastReconnectAttemptTime = nowTimeMs;
+		
+		synchronized(this) {
+			try {
+				failAllOutstanding();
+				selector = Selector.open();
+				schan = SocketChannel.open(new InetSocketAddress(
+						host.nameOrAddr, host.port));
+				schan.configureBlocking(false);
+				outBufs.clear();
+				readBuffers.clear();
+				logger.debug("Multiplexer connected to " + host);
+				return true;
+			} catch (Exception e) {
+				logger.info("Multiplexer connection to " + host + 
+						" had exception", e);
+				return false;
 			}
 		}
 	}
 	
 	/**
-	 * Read len bytes into the buffers, throwing an IOException if the read
-	 * returns prematurely.
+	 * This will call nack() on all pending requests. We have to do this if we
+	 * lose our connection to the remote server.
 	 */
-	void insistRead(ByteBuffer buf, int len) throws IOException {
-		// TODO does this work? is it common to get fewer bytes than requested?
-		if(schan.read(buf) != len) {
-			throw new IOException("Unexpected short read");
+	synchronized void failAllOutstanding() {
+		while(true) {
+			TimeoutPair timeoutPair = timeoutPq.poll();
+			if(timeoutPair == null) {
+				break;
+			}
+			MPaxPayload payload = payloads.get(timeoutPair.reqSerial);
+			payload.replResponses.nack(this.replica);
+		}
+		payloads.clear();
+	}
+	
+	boolean ready() {
+		return schan != null && schan.isConnected() && selector != null;
+	}
+
+	/**
+	 * Loop forever, reading and writing to the socket when possible, and
+	 * reconnecting if there's an IOException.
+	 */
+	protected void selectLoop() {
+		while(true) {
+			try {
+				if(!ready()) {
+					logger.debug("To reconnect");
+					if(!reconnect()) {
+						logger.debug("Reconnect failed, sleeping");
+						Util.sleep(5000);
+						continue;
+					}
+				}
+				long timeout;
+				// We're interested in sock writability iff there's queued output 
+				synchronized(this) {
+					int interestOps;
+					if(outBufs.size() > 0) {
+						interestOps = SelectionKey.OP_READ | SelectionKey.OP_WRITE; 
+					} else {
+						interestOps = SelectionKey.OP_READ;
+					}
+					schan.register(selector, interestOps);
+					
+					TimeoutPair soonestTimeout = timeoutPq.peek(); 
+					if(soonestTimeout != null) {
+						long nowTimeMs = System.currentTimeMillis();
+						timeout = soonestTimeout.finishTimeMs - nowTimeMs;
+					} else {
+						timeout = Long.MAX_VALUE;
+					}
+				}
+				
+				if(timeout >= 0) {
+					selector.select(timeout);
+				}
+				
+				// There's only one socket (so only one key)
+				Iterator<SelectionKey> keyIt = selector.selectedKeys().iterator();
+				while(keyIt.hasNext()) {
+					SelectionKey key = keyIt.next();
+					keyIt.remove();
+					if(key.isReadable()) {
+						handleReadable();
+					}
+					if(key.isWritable()) {
+						handleWritable();
+					}
+				}
+				
+				timeOutReads();
+			} catch (IOException e) {
+				logger.warn("selectLoop IOException", e);
+				try {
+					schan.close();
+					schan = null;
+				} catch (IOException ex) {}
+			}
+		} 
+	}
+	
+	/**
+	 * From our queued list of ByteBuffers pending output, write data until the
+	 * socket stops accepting any more.
+	 * TODO document why things are synchronized in this class
+	 */
+	synchronized void handleWritable() throws IOException {
+		int bytesWritten;
+		do {
+			if(outBufs.size() == 0) {
+				break;
+			}
+			ByteBuffer bb = outBufs.get(0); 
+			bytesWritten = schan.write(bb);
+			if(bb.remaining() == 0) {
+				outBufs.removeFirst(); // TODO GC pressure
+			}
+		} while(bytesWritten > 0);
+	}
+	
+	/**
+	 * Check the head of the priority queue for operations that timed out
+	 * recently, and call nack() on their payloads.
+	 */
+	void timeOutReads() {
+		long nowTimeMs = System.currentTimeMillis();
+		while(true) { 
+			synchronized(this) {
+				TimeoutPair soonestTimeout = timeoutPq.peek();
+				if(soonestTimeout == null) {
+					return;
+				}
+				
+				if(soonestTimeout.finishTimeMs > nowTimeMs) {
+					break;
+				}
+				TimeoutPair timeoutPair = timeoutPq.remove();
+				MPaxPayload payload = payloads.get(timeoutPair.reqSerial);
+				payload.replResponses.nack(replica);
+			}
 		}
 	}
+		
+	/**
+	 * This is called when the socket is readable (there's only one socket).
+	 * @throws IOException
+	 */
+	void handleReadable() throws IOException {
+		logger.debug("In handleReadable");
+//		ByteBuffer buf = readBuffers.getLast();
+//		if(buf.remaining() == 0) {
+//			buf = ByteBuffer.allocate(BUFFER_SIZE);
+//			readBuffers.add(buf);
+//		}
+		
+		// Read all available bytes from the socket into a list of ByteBuffers
+		while(true) {
+			logger.debug("hr1");
+			ByteBuffer buf = ByteBuffer.allocate(BUFFER_SIZE);
+			logger.debug("hr2");
+			int bytesRead = schan.read(buf);
+			logger.debug("hr bytesRead:" + bytesRead);
+			if(bytesRead == -1) {
+				throw new IOException("End of stream");
+			} else if(bytesRead == 0) {
+				break;
+			} else {
+				buf.flip();
+				readBuffers.add(buf);
+				if(buf.limit() != buf.capacity()) {
+					// The last buffer we read was not filled, so there must not
+					// be any more bytes in the socket
+					
+					break;
+				}
+			}
+			
+			logger.debug("hr2.5");
+		}
+		// If any complete responses are in the incoming buffers, send them to
+		// the objects that are waiting for them.
+		logger.debug("readBuffers.size(): " + readBuffers.size());
+		dispatchResponses(readBuffers);
+	}
+	
+	/**
+	 * Given a list of ByteBuffers containing zero or more incoming length-
+	 * prefixed messages, read the messages and send the messages to their 
+	 * respective waiting payload objects.
+	 */
+	void dispatchResponses(List<ByteBuffer> readBufs) throws IOException {
+		InputStream is = null;
+		byte[] reqSerialBuf = null;
+		byte[] msgLenBuf = null;
+		logger.debug("dispatchResponses" + RPCUtil.strBufs(readBufs));
+		while(RPCUtil.hasCompleteMessage(readBufs)) {
+			if(is == null) {
+				is = new BBInputStream(readBufs);
+			}
+			if(reqSerialBuf == null) {
+				reqSerialBuf = new byte[Long.SIZE/8];
+			}
+			if(msgLenBuf == null) {
+				msgLenBuf = new byte[Integer.SIZE/8];
+			}
+			
+			int nBytesRead = is.read(msgLenBuf);
+			assert nBytesRead == Integer.SIZE/8;
+			int msgLen = Util.bytesToInt(msgLenBuf);
+			
+			assert is.available() > msgLen;
+			is.read(reqSerialBuf);
+			long reqSerial = Util.bytesToLong(reqSerialBuf); 
+			byte[] response = new byte[msgLen]; // TODO GC pressure
+			is.read(response);
+			synchronized(this) {
+				MPaxPayload payload = payloads.get(reqSerial);
+				if(payload != null) {
+					payloads.remove(reqSerial);
+					timeoutPq.remove(payload);
+				}
+				payload.replResponses.ack(replica, response);
+			}
+		}
+	}
+	
+//	/**
+//	 * Reset the input buffer to its pristine state: a list containing one empty
+//	 * ByteBuffer ready for reading.
+//	 */
+//	void resetReadBuffers() {
+//		ByteBuffer onlyBuffer;
+//		int numReadBuffers = readBuffers.size();
+//		if(numReadBuffers > 1) {
+//			onlyBuffer = readBuffers.get(0);
+//			onlyBuffer.clear();
+//			readBuffers.clear();
+//			readBuffers.add(onlyBuffer);
+//		} else if (numReadBuffers == 0) {
+//			onlyBuffer = ByteBuffer.allocate(BUFFER_SIZE);
+//			readBuffers.add(onlyBuffer);
+//		} else {
+//			readBuffers.get(0).clear();
+//		}
+//	}
 	
 	protected synchronized long getNextSerial() {
 		reqSerial++;
 		return reqSerial;
-	}
-	
-	/**
-	 * If there has been a socket error, this call could fail. If this happens,
-	 * the caller should create another object and try again. (TODO correct?)
-	 */
-	public void prepare(long walIndex, long n, RespWaiter<WALEntry> waiter)
-	throws IOException {
-//		AvroPrepare msg = new AvroPrepare();
-////		msg.reqSerial = getNextSerial();
-//		msg.n = n;
-//		msg.walIndex = walIndex;
-
-
-		// TODO pool these for less GC?
-		ByteArrayOutputStream bao = new ByteArrayOutputStream();
-		// TODO cache encoders? they're not thread safe though
-		BinaryEncoder e = EncoderFactory.get().binaryEncoder(bao, null);
-		bao.write(MegalonMsg.MSG_PREPARE);
-		prepareWriter.write(msg, e);
-		e.flush();
-
-		waiters.put(msg.reqSerial, waiter); // Waiter will run if/when response
-		
-		writeLengthPrefixed(bao.toByteArray());
-		logger.debug("wrote prepare msg to replica: " + replica + " host: " + 
-				host);		
-	}
-	
-	/**
-	 * If there has been a socket error, this call could fail. If this happens,
-	 * the caller should create another object and try again. (TODO correct?)
-	 */
-	public void accept(long walIndex, AvroWALEntry entry, 
-			RespWaiter<Object> waiter) throws IOException {
-		AvroAccept msg = new AvroAccept();
-		msg.walEntry = entry;
-		msg.reqSerial = getNextSerial();
-		msg.walIndex = walIndex;
-		ByteArrayOutputStream bao = new ByteArrayOutputStream();
-		// TODO cache encoders? they're not thread safe though
-		BinaryEncoder e = EncoderFactory.get().binaryEncoder(bao, null);
-		bao.write(MegalonMsg.MSG_ACCEPT);
-		acceptWriter.write(msg, e);
-		e.flush();
-		byte[] outgoingBytes = bao.toByteArray();
-		writeLengthPrefixed(outgoingBytes);
-		logger.debug("Wrote accept msg to replica: " + replica + " host: " + 
-				host);
 	}
 	
 	/**
@@ -267,61 +396,28 @@ public class PaxosSocketMultiplexer {
 		}
 	}
 	
-	static class RespWaiter<T> {
-		public Map<String,T> responses;
-		int validResponses = 0;
-		int nackResponses = 0;
-		int numExpected;
-		Log logger = LogFactory.getLog(RespWaiter.class);
+	/**
+	 * To keep a priority queue that gives us the soonest timeout, we need a
+	 * class that sorts by finishing time and points to a request serial number
+	 * of the request that's timing out. This is that class. This is the type
+	 * of objects that go into the priority queue.
+	 */
+	static class TimeoutPair {
+		long finishTimeMs, reqSerial;
 		
-		public RespWaiter(int numExpected) {
-			responses = new HashMap<String,T>();
-			this.numExpected = numExpected;
+		public TimeoutPair(long finishTimeMs, long reqSerial) {
+			this.finishTimeMs = finishTimeMs;
+			this.reqSerial = reqSerial;
 		}
 		
-		synchronized public void response(String replica, T response) {
-			responses.put(replica, response);
-			validResponses++;
-			notify();
-		}
-		
-		synchronized public void nack(String replica) {
-			responses.put(replica, null);
-			nackResponses++;
-			notify();
-		}
-		
-		synchronized public boolean waitForQuorum(int timeoutMs) {
-			long startTime = System.currentTimeMillis();
-			while(true) {
-				if(validResponses >= numExpected / 2 + 1) {
-					// Quorum has been reached
-					logger.debug("quorum reached");
-					notifyAll();
-					return true;
-				}
-				if(nackResponses >= (numExpected + 1) / 2) {
-					// No quorum is possible, half of responses are nacks
-					logger.debug("waitForQuorum impossible quorum");
-					notifyAll();
-					return false;
-				}
-				long waitMs = timeoutMs - (System.currentTimeMillis() - 
-						startTime);
-				if(waitMs > 0) {
-					try {
-						wait(waitMs);
-					} catch (InterruptedException e) {}
-				} else {
-					logger.debug("waitForQuorum timeout");
-					notifyAll();
-					return false;
-				}
+		/**
+		 * This comparator allows the PriorityQueue to sort in order of timeout:
+		 * the next object in the PQ will be the soonest request to timeout.
+		 */
+		static class TPComparator implements Comparator<TimeoutPair> {
+			public int compare(TimeoutPair l, TimeoutPair r) {
+				return Long.valueOf(l.finishTimeMs).compareTo(r.finishTimeMs);
 			}
-		}
-		
-		synchronized Collection<T> getResponses() {
-			return responses.values();
 		}
 	}
 }

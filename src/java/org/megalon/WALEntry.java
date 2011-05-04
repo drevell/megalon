@@ -14,10 +14,10 @@ import org.megalon.avro.AvroWriteVal;
  * future.
  */
 public class WALEntry {
-	public static enum Status {ACCEPTED, CHOSEN, PREPARED};
+	public static enum Status {NEW, ACCEPTED, CHOSEN, PREPARED};
 	
 	long n;
-	List<SingleWrite> values = null; // TODO nullable values in Avro
+	List<SingleWrite> values = null;
 	Status status;
 	
 	public WALEntry(AvroWALEntry avroEntry) {
@@ -30,6 +30,9 @@ public class WALEntry {
 			}
 		}
 		switch(avroEntry.status) {
+		case NEW:
+			this.status = Status.NEW;
+			break;
 		case ACCEPTED:
 			this.status = Status.ACCEPTED;
 			break;
@@ -49,6 +52,11 @@ public class WALEntry {
 		this.status = status;
 	}
 	
+	public WALEntry(List<SingleWrite> values) {
+		this.values = values;
+		this.status = Status.NEW;
+	}
+	
 	public AvroWALEntry toAvro() {
 		AvroWALEntry avroEntry = new AvroWALEntry();
 		avroEntry.n = n;
@@ -59,6 +67,9 @@ public class WALEntry {
 			}
 		}
 		switch(status) {
+		case NEW:
+			avroEntry.status = AvroWALEntryStatus.NEW;
+			break;
 		case ACCEPTED:
 			avroEntry.status = AvroWALEntryStatus.ACCEPTED;
 			break;

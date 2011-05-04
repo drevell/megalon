@@ -6,7 +6,7 @@
         {
             "name": "AvroWALEntryStatus",
             "type": "enum",
-            "symbols": ["PREPARED", "ACCEPTED", "CHOSEN"]
+            "symbols": ["NEW", "PREPARED", "ACCEPTED", "CHOSEN"]
         },
         {
             "name": "AvroAckOrNack",
@@ -41,7 +41,7 @@
             "type": "record",
             "fields": [
                 {"name": "n", "type": "long"},
-                {"name": "reqSerial", "type": "long"},
+                //{"name": "reqSerial", "type": "long"},
                 {"name": "walIndex", "type": "long"}
             ]
         },
@@ -50,7 +50,8 @@
             "type": "record",
             "fields": [
                 {"name": "walEntry", "type": ["null", "AvroWALEntry"]},
-                {"name": "reqSerial", "type": "long"}
+                //{"name": "reqSerial", "type": "long"},
+                {"name": "hadQuorum", "type": "boolean"}
             ]
         },
         {   
@@ -58,7 +59,7 @@
             "type": "record",
             "fields": [
                 {"name": "walEntry", "type": "AvroWALEntry"},
-                {"name": "reqSerial", "type": "long"},
+                //{"name": "reqSerial", "type": "long"},
                 {"name": "walIndex", "type": "long"}
             ]
         },
@@ -66,7 +67,7 @@
             "name": "AvroAcceptResponse",
             "type": "record",
             "fields": [
-                {"name": "reqSerial", "type": "long"},
+                //{"name": "reqSerial", "type": "long"},
                 //{"name": "ackOrNack", "type": "AvroAckOrNack"}
                 {"name": "acked", "type": "boolean"}
             ]

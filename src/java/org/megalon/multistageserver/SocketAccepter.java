@@ -8,6 +8,7 @@ import java.nio.channels.SocketChannel;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.megalon.multistageserver.MultiStageServer.Stage;
 
 /**
  * This class listens for incoming connections socket connections. When a new
@@ -20,33 +21,37 @@ import org.apache.commons.logging.LogFactory;
  * @param T is the class of the payload object that will be passed to/from the
  * stages of the MultiStageServer.
  */
-public class SocketAccepter<T extends MultiStageServer.Payload> {
+public class SocketAccepter<T extends SocketPayload> {
 	MultiStageServer<T> server;
 	InetAddress addr;
 	int port;
-	int startStage;
+	Stage<T> startStage;
 	Log logger = LogFactory.getLog(SocketAccepter.class);
 	PayloadFactory<T> payloadFactory;
 	boolean inited = false;
+	boolean blocking;
 	
 	public SocketAccepter(MultiStageServer<T> server, InetAddress addr,
-			int port, int startStage, PayloadFactory<T> payloadFactory) {
-		init(server, addr, port, startStage, payloadFactory);
+			int port, Stage<T> startStage, PayloadFactory<T> payloadFactory, 
+			boolean blocking) {
+		init(server, addr, port, startStage, payloadFactory, blocking);
 	}
 	
 	public SocketAccepter() { }
 	
 	public void init(MultiStageServer<T> server, InetAddress addr, int port,
-			int startStage, PayloadFactory<T> payloadFactory) {
+			Stage<T> startStage, PayloadFactory<T> payloadFactory, 
+			boolean blocking) {
 		this.server = server;
 		this.addr = addr;
 		this.port = port;
 		this.startStage = startStage;
 		this.payloadFactory = payloadFactory;
+		this.blocking = blocking;
 		this.inited = true;
 	}
 	
-	public interface PayloadFactory<T extends MultiStageServer.Payload> {
+	public interface PayloadFactory<T extends SocketPayload> {
 		public T makePayload(SocketChannel sockChan);
 	}
 	
@@ -63,27 +68,33 @@ public class SocketAccepter<T extends MultiStageServer.Payload> {
 	}
 	
 	public void runForever() throws IOException, Unconfigured {
-		if(!inited) {
-			throw new Unconfigured("SocketAccepter.runForever invoked " +
-					"before initialized");
-		}
-		// Bind to the desired IP/port
-		ServerSocketChannel servChan = ServerSocketChannel.open();
-		servChan.socket().bind(new InetSocketAddress(addr, port));
-		
-		while(true) {
-			// TODO multiple accepter threads?
-			SocketChannel acceptedChan = servChan.accept();
-			InetSocketAddress remoteAddr = (InetSocketAddress)
-			   acceptedChan.socket().getRemoteSocketAddress();
-			logger.debug("New connection from " + remoteAddr);
-			
-			T payload = payloadFactory.makePayload(acceptedChan);
-			
-			if(!server.enqueue(payload, startStage)) {
-				logger.warn("The start stage (id " + startStage
-						+ ") wasn't defined");
+		try {
+			if(!inited) {
+				throw new Unconfigured("SocketAccepter.runForever invoked " +
+						"before initialized");
 			}
+			// Bind to the desired IP/port
+			ServerSocketChannel servChan = ServerSocketChannel.open();
+			servChan.socket().bind(new InetSocketAddress(addr, port));
+		
+			while(true) {
+				logger.debug("To accept()");
+				SocketChannel acceptedChan = servChan.accept();
+				InetSocketAddress remoteAddr = (InetSocketAddress)
+					acceptedChan.socket().getRemoteSocketAddress();
+				logger.debug("New connection from " + remoteAddr);
+				acceptedChan.configureBlocking(blocking);
+				
+				T payload = payloadFactory.makePayload(acceptedChan);
+				
+				if(!server.enqueue(payload, startStage)) {
+					logger.warn("The start stage (id " + startStage
+							+ ") wasn't defined");
+				}
+			}
+		} catch (IOException e) {
+			logger.warn("SocketAccepter exception", e);
+			throw e;
 		}
 	}
 }

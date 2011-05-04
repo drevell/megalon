@@ -9,6 +9,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -30,17 +31,40 @@ public class Config {
 	boolean run_coord = false;
 	boolean coord_listen = false;
 	int coord_port = 35791;
+	boolean run_client = true;
 	
 	ReplicaDesc myReplica;
 	Map<String,ReplicaDesc> replicas;
 	
 	public class Host {
+		// TODO define hashcode/equals? objects are used as hashmap keys
 		String nameOrAddr;
 		int port;
 		
 		public Host(String nameOrAddr, int port) {
 			this.nameOrAddr = nameOrAddr;
 			this.port = port;
+		}
+		
+		public boolean equals(Object other) {
+			try {
+				Host otherHost = (Host)other;
+				return (nameOrAddr.equals(otherHost.nameOrAddr)) && 
+					(port == otherHost.port);
+			} catch (ClassCastException e) {
+				return false;
+			}
+		}
+		
+		public int hashCode() {
+			return new HashCodeBuilder(11, 17).
+				append(nameOrAddr).
+				append(port).
+				toHashCode();
+		}
+		
+		public String toString() {
+			return nameOrAddr + ":" + port;
 		}
 	}
 	
@@ -69,7 +93,7 @@ public class Config {
 			} catch (ClassCastException e) {
 				fail("Config seemed to be grossly misformatted.");
 			} catch (ScannerException e) {
-				fail("YAML parse failed, exception " + e.getClass().getName(), e);
+				fail("YAML parse of " + file.getName() + " failed", e);
 			}
 		}
 		
@@ -131,7 +155,7 @@ public class Config {
 				"repl_name", "node config should have a string \"%k\"", null);		
 		myReplica = replicas.get(replicaName);
 		if(myReplica == null) {
-			fail("This node is a member of replica \"" + replicaName +
+			fail("This node is a member of replica \"" + replicaName + "\"" +
 					" but no such replica was configured");
 		}
 		
@@ -149,7 +173,8 @@ public class Config {
 				false);
 		coord_port = (Integer)safeGet(nodeConf, Integer.class, "coord_port",
 				"node config \"%k\" should have type \"%t\"", coord_port);
-		
+		run_client = (Boolean)safeGet(nodeConf, Boolean.class, "run_client", 
+				"node config \"%k\" should be boolean", run_client);
 	}
 	
 	/**
@@ -226,7 +251,7 @@ public class Config {
 	}
 	
 	void fail(String msg, Throwable e) {
-		logger.error(msg, null);
+		logger.error(msg, e);
 		System.exit(-1);
 	}
 	

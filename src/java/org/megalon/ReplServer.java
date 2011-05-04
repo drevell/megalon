@@ -1,34 +1,17 @@
 package org.megalon;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.HashSet;
+import java.util.Set;
 
-import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.DatumWriter;
-import org.apache.avro.io.Decoder;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.io.Encoder;
-import org.apache.avro.io.EncoderFactory;
-import org.apache.avro.specific.SpecificDatumReader;
-import org.apache.avro.specific.SpecificDatumWriter;
-import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.megalon.avro.AvroAccept;
-import org.megalon.avro.AvroAcceptResponse;
-import org.megalon.avro.AvroPrepare;
-import org.megalon.avro.AvroPrepareResponse;
 import org.megalon.multistageserver.MultiStageServer;
-import org.megalon.multistageserver.MultiStageServer.StageDesc;
+import org.megalon.multistageserver.MultiStageServer.Stage;
+import org.megalon.multistageserver.SelectorStage;
 import org.megalon.multistageserver.SocketAccepter;
+import org.megalon.multistageserver.SocketPayload;
 
 /**
  * This class implements the Replication Server component of megalon. It
@@ -36,122 +19,89 @@ import org.megalon.multistageserver.SocketAccepter;
  * apply changes to the WAL & main DB).
  */
 public class ReplServer {
-	public static final int STAGE_ID = 1;
-	
-	// TODO use config
-	public static final int CONCURRENT_CLIENTS = 1000;
-	
 	static Log logger = LogFactory.getLog(ReplServer.class);
 	Megalon megalon;
 	InetSocketAddress proxyTo;
 	WAL wal;
-	MultiStageServer<MPayload> server;
-	List<SocketAccepter<MPayload>> socketAccepters = 
-		new LinkedList<SocketAccepter<MPayload>>();
-	Lock socketAcceptersLock = new ReentrantLock();
+	MultiStageServer<MReplPayload> coreServer;
+	final SocketAccepter<MSocketPayload> socketAccepter = 
+		new SocketAccepter<MSocketPayload>();
+	MultiStageServer<MSocketPayload> socketServer;
 	boolean ready = false;
+	Stage<MReplPayload> execStage;
+	Stage<MSocketPayload> selectorStage;
+	AvroDecodeStage avroDecodeStage; 
+	AvroEncodeStage avroEncodeStage; 
+	PaxosProposer paxos;
 	
-	public ReplServer(Megalon megalon) {
+	public ReplServer(Megalon megalon) throws IOException {
 		this.megalon = megalon;
-		Map<Integer,StageDesc<MPayload>> stages = 
-			new HashMap<Integer,StageDesc<MPayload>>();
-		StageDesc<MPayload> stageDesc = new StageDesc<MPayload>(
-				CONCURRENT_CLIENTS, new ReplServerStage(), "repl_server");
-		stages.put(STAGE_ID, stageDesc);
-		server = new MultiStageServer<MPayload>(stages);
 	}
 	
 	public void init() throws IOException {
-		logger.debug("Replication server starting");
+		logger.debug("Replication server init'ing");
 		wal = new WAL(megalon);
+
+		// The coreServer contains the stages that are the same regardless of 
+		// whether the request arrived by socket or by function call.
+		Set<Stage<MReplPayload>> coreStages = new HashSet<Stage<MReplPayload>>();
+		execStage = new ReplRemoteHandlerStage(wal);
+		coreStages.add(execStage);
+		coreServer = new MultiStageServer<MReplPayload>(coreStages);
+		
+		// The socketServer contains the stages that only run for socket
+		// connections. The socketServer hands off requests to coreServer to
+		// do the actual database operations.
+		Set<Stage<MSocketPayload>> socketSvrStages = 
+			new HashSet<Stage<MSocketPayload>>();
+		avroDecodeStage = new AvroDecodeStage();
+		selectorStage = new SelectorStage<MSocketPayload>(avroDecodeStage, 
+				"replSelectorStage", 1, 50);
+		avroEncodeStage = new AvroEncodeStage(selectorStage);
+		avroDecodeStage.init(avroEncodeStage, coreServer, 
+				execStage, selectorStage);
+		socketSvrStages.add(selectorStage);
+		socketSvrStages.add(avroEncodeStage);
+		socketSvrStages.add(avroDecodeStage);
+		socketServer = new MultiStageServer<MSocketPayload>(socketSvrStages);
+		
+		paxos = new PaxosProposer(megalon); 
+
+		
 		ready = true; // TODO use this value to prevent premature ops?
+		logger.debug("Replication server done with init");
 	}
 	
 	protected void startSocketAccepter() {
-		final SocketAccepter<MPayload> accepter = new MSocketAccepter(server,
-				null, megalon.config.replsrv_port, STAGE_ID);
+		// The socket accepter will send new connections to the socketServer's
+		// stage "selectorStage".
+		socketAccepter.init(socketServer, null, megalon.config.replsrv_port, 
+				selectorStage, new MSocketPayload.Factory(), false);
 		Thread accepterThread = new Thread() {
 			public void run() {
 				try {
-					accepter.runForever();
+					logger.debug("MSocketAccepter starting on port " + 
+							megalon.config.replsrv_port);
+					socketAccepter.runForever();
 				} catch (Exception e) {
 					logger.warn("ReplServer accepter exception", e);
 				}
 			}
 		};
+		accepterThread.setDaemon(true);
 		accepterThread.start();
-		try {
-			socketAcceptersLock.lock();
-			socketAccepters.add(accepter);
-		} finally {
-			socketAcceptersLock.unlock();
-		}
+		logger.debug("Replication server accepter thread running");
 	}
 	
 	public boolean isReady() {
 		return ready;
 	}
 	
-	class ReplServerStage implements MultiStageServer.Stage<MPayload> {
-		final DatumReader<AvroPrepare> prepareReader = 
-			new SpecificDatumReader<AvroPrepare>(AvroPrepare.class);
-		final DatumWriter<AvroPrepareResponse> prepareRespWriter = new 
-			SpecificDatumWriter<AvroPrepareResponse>(AvroPrepareResponse.class);
-		final DatumReader<AvroAccept> acceptReader = 
-			new SpecificDatumReader<AvroAccept>(AvroAccept.class);
-		final DatumWriter<AvroAcceptResponse> acceptRespWriter = 
-			new SpecificDatumWriter<AvroAcceptResponse>(AvroAcceptResponse.class);
-		
-		public int runStage(MPayload payload) throws Exception {
-			// TODO it would be nice if we didn't use Avro directly here. It
-			// would be better to have some general system where any
-			// serialization system could be plugged in.
-			InputStream is = payload.sockChan.socket().getInputStream();
-			OutputStream os = payload.sockChan.socket().getOutputStream();
-//			ByteBuffer bb = ByteBuffer.allocate(4096);
-//			payload.sockChan.read(bb);
-//			bb.flip();
-//			ByteArrayInputStream bis = new ByteArrayInputStream(bb.array());
-			Decoder dec = DecoderFactory.get().binaryDecoder(is, null);
-			Encoder enc = EncoderFactory.get().binaryEncoder(os, null);
-			while(true) {
-				byte[] msgType = new byte[1];
-				is.read(msgType, 0, 1);
-				// TODO don't do IO here, parse message and pass to next stage
-				switch(msgType[0]) {
-				
-				case PaxosSocketMultiplexer.MSG_PREPARE:
-					AvroPrepare avroPrepare = prepareReader.read(null, dec);
-					WALEntry result = 
-						wal.prepareLocal(avroPrepare.walIndex, avroPrepare.n);
-					AvroPrepareResponse avResp = new AvroPrepareResponse();
-					avResp.reqSerial = avroPrepare.reqSerial;
-					if(result == null) {
-						avResp.walEntry = null;
-					} else {
-						avResp.walEntry = result.toAvro();
-					}
-					prepareRespWriter.write(avResp, enc);
-					break;
-				case PaxosSocketMultiplexer.MSG_ACCEPT:
-					AvroAccept avroAccept = acceptReader.read(null, dec);
-					WALEntry walEntry = new WALEntry(avroAccept.walEntry);
-					AvroAcceptResponse response = new AvroAcceptResponse();
-					response.reqSerial = avroAccept.reqSerial;
-					response.acked = wal.acceptLocal(avroAccept.walIndex, 
-							walEntry);
-					acceptRespWriter.write(response, enc);
-					break;
-				default:
-					logger.warn("ReplServer received unknown msg type, " +
-							"closing connection");
-					return -1; // payload finalizer will close the socket
-				}
-			}
+	public void close(SocketPayload sockPayload) {
+		try {
+			sockPayload.sockChan.close();
+		} catch (IOException e) {
+			logger.info("IOException closing socket", e);
 		}
-	}
-	
-	public static class ReplServerStatus {
-		
 	}
 }

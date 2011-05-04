@@ -3,7 +3,7 @@ package org.megalon.multistageserver;
 import java.net.InetAddress;
 import java.nio.channels.SocketChannel;
 
-import org.megalon.multistageserver.MultiStageServer.Payload;
+import org.megalon.multistageserver.MultiStageServer.Stage;
 import org.megalon.multistageserver.SocketAccepter.PayloadFactory;
 
 
@@ -12,14 +12,15 @@ import org.megalon.multistageserver.SocketAccepter.PayloadFactory;
  * this class saves the effort of inheriting SocketAccepter.
  */
 
-public class PlainSocketAccepter extends SocketAccepter<Payload> implements 
-PayloadFactory<Payload> {
-	public PlainSocketAccepter(MultiStageServer<Payload> server, 
-			InetAddress addr, int port, int startStage) {
-		super.init(server, addr, port, startStage, this);
+public class PlainSocketAccepter extends SocketAccepter<SocketPayload> implements 
+PayloadFactory<SocketPayload> {
+	public PlainSocketAccepter(MultiStageServer<SocketPayload> server, 
+			InetAddress addr, int port, Stage<SocketPayload> startStage, 
+			boolean blocking) {
+		super.init(server, addr, port, startStage, this, blocking);
 	}
 	
-	public Payload makePayload(SocketChannel sockChan) {
-		return new Payload(sockChan);
+	public SocketPayload makePayload(SocketChannel sockChan) {
+		return new SocketPayload(sockChan);
 	}
 }

@@ -22,7 +22,13 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.megalon.avro.AvroWALEntry;
 
+/**
+ * An interface to the write-ahead log in HBase.
+ * TODO fine grained locking/pooling instead of synchronized methods
+ */
 public class WAL {
+	// TODO go fully asynchronous (use asynchbase?)
+
 	public static final byte[] ENTRY_BYTES = "entry".getBytes();
 	public static final byte[] N_BYTES = "n".getBytes();
 	public static final int MAX_ACCEPT_TRIES = 5;
@@ -36,18 +42,33 @@ public class WAL {
 		new SpecificDatumReader<AvroWALEntry>(AvroWALEntry.class);
 	final DatumWriter<AvroWALEntry> writer = 
 		new SpecificDatumWriter<AvroWALEntry>(AvroWALEntry.class); 
-	final Configuration hconf;
+	Configuration hconf;
 	HTable htable;
 	Megalon megalon;
 
-	public WAL(Megalon megalon) throws IOException {
+	public WAL(Megalon megalon){
 		this.megalon = megalon;
-		hconf = HBaseConfiguration.create(); // TODO HBase address
-//		hconf.set("hbase.zookeeper.quorum", commaSepZkServers);
-		htable = new HTable(hconf, "CommitLogTable");
+		connect();
 	}
 	
-	public WALEntry read(long walIndex) throws IOException {
+	public void connect() {
+		hconf = HBaseConfiguration.create(); // TODO HBase address
+	//	hconf.set("hbase.zookeeper.quorum", commaSepZkServers);
+		try {
+			htable = new HTable(hconf, "CommitLog");
+		} catch (IOException e) {
+			logger.warn("HTable connection failure", e);
+		}
+	}
+	
+	void requireHtableConnected() throws IOException {
+		if(htable == null) {
+			throw new IOException("HTable disconnected");
+		}
+	}
+	
+	synchronized public WALEntry read(long walIndex) throws IOException {
+		requireHtableConnected();
 		Get get = new Get(Util.longToBytes(walIndex));
 		get.addColumn(cf, ENTRY_BYTES);
 
@@ -76,8 +97,9 @@ public class WAL {
 	 * existing log message, which also means Paxos NACK. 
 	 * @throws IOException
 	 */
-	public WALEntry prepareLocal(long walIndex, long n) 
+	synchronized public WALEntry prepareLocal(long walIndex, long n) 
 	throws IOException {
+		requireHtableConnected();
 		int tries = 0;
 		while(true) {
 			try {
@@ -110,8 +132,10 @@ public class WAL {
 	/**
 	 * Write an entry to the WAL in HBase.
 	 */
-	protected void putWAL(long walIndex, WALEntry entry, WALEntry casCheck) 
+	synchronized protected void putWAL(long walIndex, WALEntry entry, WALEntry casCheck) 
 	throws IOException {
+		requireHtableConnected();
+		
 		ByteArrayOutputStream bao = new ByteArrayOutputStream();
 		BinaryEncoder e = EncoderFactory.get().binaryEncoder(bao, null);
 		byte[] walIndexBytes = Util.longToBytes(walIndex);
@@ -140,8 +164,10 @@ public class WAL {
 	 * @return true if the entry had the highest n seen yet and was written to
 	 * the WAL. false otherwise.
 	 */
-	protected boolean acceptLocal(long walIndex, WALEntry entry) 
+	synchronized protected boolean acceptLocal(long walIndex, WALEntry entry) 
 	throws IOException {
+		requireHtableConnected();
+		
 		int tries = 0;
 		while(true) {
 			try {

@@ -6,10 +6,14 @@ node:
     
     # Should this node run the replication server component?
     run_replsrv: true
-    repsrv_listen: true
+    replsrv_listen: true
     replsrv_port: 35792
 
     # Should this node run the coordinator component?
     run_coord:  true
     coord_listen: true
     coord_port: 35791
+
+    # Should this node be a client?
+    run_client: true
+    

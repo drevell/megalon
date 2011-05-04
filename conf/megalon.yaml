@@ -12,12 +12,15 @@ global:
             zk:     ["holmes:35793"]
                 
         -   name:   east
-            hbase:  ["holmes:9210"]
+            hbase:  ["meg1:9210"]
             coord:  ["meg1:35791"]
-            replsrv: ["meg1:35791"]
+            replsrv: ["meg1:35792"]
             zk:     ["meg1:35793"]
 
+        -   name:   north 
+            hbase:  ["meg2:9210"]
+            coord:  ["meg2:35791"]
+            replsrv: ["meg2:35792"]
+            zk:     ["meg2:35793"]
 
-        #-   name:   north
-        #-   name:   south
 
