@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 
 import org.apache.commons.logging.Log;
@@ -79,7 +80,9 @@ public class RPCUtil {
 	
 	/**
 	 * Read an int from an InputStream.
+	 * @deprecated Array allocation causes GC pressure
 	 */
+	@Deprecated
 	static int readInt(InputStream is) throws IOException {
 		byte[] buf = new byte[Integer.SIZE/8];
 		is.read(buf);
@@ -88,10 +91,53 @@ public class RPCUtil {
 
 	/**
 	 * Read an long from an InputStream.
+	 * @deprecated Array allocation causes GC pressure
 	 */
+	@Deprecated
 	static long readLong(InputStream is) throws IOException {
 		byte[] buf = new byte[Long.SIZE/8];
 		is.read(buf);
 		return Util.bytesToLong(buf);
+	}
+	
+	/**
+	 * From a list of ByteBuffers, return a list of ByteBuffers spanning the
+	 * first nBytes bytes. The positions of the ByteBuffers in the "from" list
+	 * will advance past the bytes that have been "read."
+	 */
+	static List<ByteBuffer> extractBufs(int nBytes, List<ByteBuffer> fromBufs) 
+	throws IOException {
+		LinkedList<ByteBuffer> outBufs = new LinkedList<ByteBuffer>();
+		for(ByteBuffer bb: fromBufs) {
+			int nBytesThisBuffer = Math.min(nBytes, bb.remaining());
+			ByteBuffer newBb = bb.slice();
+			newBb.limit(newBb.position() + nBytesThisBuffer);
+			bb.position(bb.position() + nBytesThisBuffer);
+			nBytes -= nBytesThisBuffer;
+			if(nBytes == 0) {
+				return outBufs;
+			}
+		}
+		throw new IOException("Not enough bytes to extract");
+	}
+	
+	/**
+	 * From a list of ByteBuffers, return an array of bytes containing the first
+	 * n bytes. The positions of the ByteBuffers in the "from" list will advance 
+	 * past the bytes that have been "read."
+	 */
+	static byte[] extractBytes(int nBytes, List<ByteBuffer> fromBufs) throws IOException {
+		byte[] outArr = new byte[nBytes];
+		int outIndex = 0;
+		for(ByteBuffer bb: fromBufs) {
+			int nBytesThisBuffer = Math.min(nBytes, bb.remaining());
+			bb.get(outArr, outIndex, nBytesThisBuffer);
+			nBytes -= nBytesThisBuffer;
+			if(nBytes == 0) {
+				return outArr;
+			}
+			outIndex += nBytesThisBuffer;
+		}
+		throw new IOException("Not enough bytes to extract");
 	}
 }

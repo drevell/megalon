@@ -1,11 +1,11 @@
 package org.megalon;
 
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-import org.megalon.Config.Host;
 import org.megalon.multistageserver.MultiStageServer;
-import org.megalon.multistageserver.MultiStageServer.Finisher;
 import org.megalon.multistageserver.MultiStageServer.Stage;
 import org.megalon.multistageserver.Payload;
 
@@ -46,7 +46,8 @@ public class MPaxPayload extends Payload {
 		Stage<MPaxPayload> nextStage = null;
 		MultiStageServer<MPaxPayload> server = null;
 		int expectedResponses = 0;
-		Map<String, byte[]> responses = new ConcurrentHashMap<String, byte[]>();
+		Map<String, List<ByteBuffer>> responses = 
+			new HashMap<String, List<ByteBuffer>>();
 		boolean inited = false;
 		
 		protected ReplResponses() {}
@@ -63,7 +64,7 @@ public class MPaxPayload extends Payload {
 		/**
 		 * Called by the RPCClient when a valid response is received.
 		 */
-		synchronized public void ack(String replica, byte[] response) {
+		synchronized public void ack(String replica, List<ByteBuffer> response) {
 			assert inited;
 			responses.put(replica, response);
 			enqueueIfAllResponses();
@@ -74,7 +75,7 @@ public class MPaxPayload extends Payload {
 		 */
 		synchronized public void nack(String replica) {
 			assert inited;
-			responses.put(replica, new byte[0]);
+			responses.put(replica, null);
 			enqueueIfAllResponses();
 		}
 		
@@ -96,18 +97,5 @@ public class MPaxPayload extends Payload {
 		public MultiStageServer<MPaxPayload> getServer() {
 			return server;
 		}
-		
 	}
-	
-//	synchronized void finish(MPaxPayload payload) {
-//		isFinished = true;
-//		notifyAll();
-//	}
-//	
-//	synchronized boolean waitFinished() {
-//		if(!isFinished) {
-//			wait();
-//		}
-//		return isFinished;
-//	}
 }

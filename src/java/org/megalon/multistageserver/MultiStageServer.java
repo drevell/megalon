@@ -60,7 +60,7 @@ public class MultiStageServer<T extends Payload> {
 	/**
 	 * Constructor that just wraps a call to init().
 	 */
-	public MultiStageServer(Set<Stage<T>> stages) {
+	public MultiStageServer(Set<Stage<T>> stages) throws Exception {
 		init(stages);
 	}
 	
@@ -88,7 +88,7 @@ public class MultiStageServer<T extends Payload> {
 	 * internally with a small number of threads to run the payload finishers. 
 	 */
 	public void init(Set<Stage<T>> stages, ThreadPoolExecutor 
-			finisherExec) {
+			finisherExec) throws Exception {
 		// Make a ThreadFactory that produces daemon threads
 		daemonThreadFactory = new ThreadFactory() {
 			public Thread newThread(Runnable r) {
@@ -115,9 +115,11 @@ public class MultiStageServer<T extends Payload> {
 	}
 	
 	/**
-	 * A wrapper around init() that uses the default logger.
+	 * A wrapper around init() that uses the default finisher executor pool.
+	 * If you don't know what a finisher executor pool is, this is the right
+	 * init() function for you.
 	 */
-	public void init(Set<Stage<T>> stages) {
+	public void init(Set<Stage<T>> stages) throws Exception {
 		init(stages, null);
 	}
 	
@@ -176,17 +178,23 @@ public class MultiStageServer<T extends Payload> {
 	 *  For each server stage, set up a thread pool and queue of pending work.
 	 */
 	protected Map<Stage<T>,ThreadPoolExecutor> setupExecutors(
-			Set<Stage<T>> stages) {
+			Set<Stage<T>> stages) throws Exception {
 		Map<Stage<T>,ThreadPoolExecutor> stageExecutors = 
 				new ConcurrentHashMap<Stage<T>, ThreadPoolExecutor>();
 		for(Stage<T> stage : stages) {
-			BlockingQueue<Runnable> queue = 
-				new LinkedBlockingQueue<Runnable>(stage.getBacklogSize());
-			int concurrent = stage.getNumConcurrent();
-			ThreadPoolExecutor exec = new ThreadPoolExecutor(
-					concurrent, concurrent, 100, TimeUnit.MILLISECONDS, queue, 
-					daemonThreadFactory);
-			stageExecutors.put(stage, exec);
+			try {
+				BlockingQueue<Runnable> queue = 
+					new LinkedBlockingQueue<Runnable>(stage.getBacklogSize());
+				int concurrent = stage.getNumConcurrent();
+				ThreadPoolExecutor exec = new ThreadPoolExecutor(
+						concurrent, concurrent, 100, TimeUnit.MILLISECONDS, queue, 
+						daemonThreadFactory);
+				stageExecutors.put(stage, exec);
+			} catch (Throwable e) {
+				String errMsg = "Error initializing stage";
+				logger.error(errMsg, e);
+				throw new Exception(errMsg, e);
+			}
 		}
 		return stageExecutors;
 	}

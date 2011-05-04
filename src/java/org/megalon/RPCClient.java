@@ -1,7 +1,6 @@
 package org.megalon;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
@@ -9,18 +8,18 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.TreeSet;
 
 import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.Config.Host;
-import org.megalon.multistageserver.BBInputStream;
 
 /**
  * Normal Avro RPC would have us send a request over a socket, wait for a
@@ -39,6 +38,9 @@ import org.megalon.multistageserver.BBInputStream;
 public class RPCClient {
 	public static final int BUFFER_SIZE = 16384;
 	public static final long reconnectAttemptIntervalMs = 5000;
+	public static final int INT_NBYTES = Integer.SIZE / 8;
+	public static final int LONG_NBYTES = Long.SIZE / 8;
+	
 	Log logger = LogFactory.getLog(RPCClient.class);
 	
 	SocketChannel schan;
@@ -49,19 +51,12 @@ public class RPCClient {
 	long lastReconnectAttemptTime = 0;
 	ByteBufferOutputStream os = new ByteBufferOutputStream();
 	
-	Map<Long, MPaxPayload> payloads = new ConcurrentHashMap<Long, MPaxPayload>();
-	PriorityQueue<TimeoutPair> timeoutPq = new PriorityQueue<TimeoutPair>(10, 
-			new TimeoutPair.TPComparator());
+	Map<Long, Waiter> reqBySerial = new HashMap<Long, Waiter>();
+	TreeSet<Waiter> reqByTimeout = new TreeSet<Waiter>(new Waiter.WaiterCmp());
 	
 	LinkedList<ByteBuffer> outBufs = new LinkedList<ByteBuffer>();
 	LinkedList<ByteBuffer> readBuffers = new LinkedList<ByteBuffer>();
 	Selector selector;
-	
-//	class PayloadTimeoutComparator implements Comparator<MPaxPayload> {
-//		public int compare(MPaxPayload p1, MPaxPayload p2) {
-//			return Long.valueOf(p1.finishTimeMs).compareTo(p2.finishTimeMs);
-//		}		
-//	}
 	
 	public RPCClient(Host host, String replica) {
 		this.host = host;
@@ -102,8 +97,9 @@ public class RPCClient {
 		
 		// Set up the caller to receive the response, when it arrives
 		synchronized(this) {
-			payloads.put(reqSerial, payload);
-			timeoutPq.add(new TimeoutPair(payload.finishTimeMs, reqSerial));
+			Waiter waiter = new Waiter(payload.finishTimeMs, reqSerial, payload);
+			reqBySerial.put(reqSerial, waiter);
+			reqByTimeout.add(waiter);
 			this.outBufs.addAll(outBufs); // Add output to queue
 		}
 		
@@ -118,13 +114,6 @@ public class RPCClient {
 	 * requests will be immediately nacked.
 	 */
 	protected boolean reconnect() {
-		// Throttle reconnection attempts
-//		long nowTimeMs = System.currentTimeMillis();
-//		if(lastReconnectAttemptTime + reconnectAttemptIntervalMs <= nowTimeMs) {
-//			return false;
-//		}
-//		lastReconnectAttemptTime = nowTimeMs;
-		
 		synchronized(this) {
 			try {
 				failAllOutstanding();
@@ -149,15 +138,12 @@ public class RPCClient {
 	 * lose our connection to the remote server.
 	 */
 	synchronized void failAllOutstanding() {
-		while(true) {
-			TimeoutPair timeoutPair = timeoutPq.poll();
-			if(timeoutPair == null) {
-				break;
-			}
-			MPaxPayload payload = payloads.get(timeoutPair.reqSerial);
-			payload.replResponses.nack(this.replica);
+		for(Waiter waiter: reqByTimeout) {
+			reqBySerial.remove(waiter.reqSerial);
+			waiter.payload.replResponses.nack(this.replica);
 		}
-		payloads.clear();
+		reqByTimeout.clear();
+		assert reqBySerial.size() == 0 : "Inconsistent lookup structures";
 	}
 	
 	boolean ready() {
@@ -190,12 +176,12 @@ public class RPCClient {
 					}
 					schan.register(selector, interestOps);
 					
-					TimeoutPair soonestTimeout = timeoutPq.peek(); 
-					if(soonestTimeout != null) {
-						long nowTimeMs = System.currentTimeMillis();
-						timeout = soonestTimeout.finishTimeMs - nowTimeMs;
-					} else {
+					 
+					if(reqByTimeout.isEmpty()) {
 						timeout = Long.MAX_VALUE;
+					} else {
+						long nowTimeMs = System.currentTimeMillis();
+						timeout = reqByTimeout.first().finishTimeMs - nowTimeMs;						
 					}
 				}
 				
@@ -252,19 +238,19 @@ public class RPCClient {
 	 */
 	void timeOutReads() {
 		long nowTimeMs = System.currentTimeMillis();
-		while(true) { 
-			synchronized(this) {
-				TimeoutPair soonestTimeout = timeoutPq.peek();
-				if(soonestTimeout == null) {
-					return;
-				}
+		synchronized(this) {
+			Iterator<Waiter> it = reqByTimeout.iterator();
+			while(it.hasNext()) {
+				Waiter waiter = it.next();
 				
-				if(soonestTimeout.finishTimeMs > nowTimeMs) {
+				if(waiter.finishTimeMs > nowTimeMs) {
 					break;
 				}
-				TimeoutPair timeoutPair = timeoutPq.remove();
-				MPaxPayload payload = payloads.get(timeoutPair.reqSerial);
-				payload.replResponses.nack(replica);
+				waiter.payload.replResponses.nack(replica);
+				
+				// Remove the timed out waiter from our tracking structures
+				it.remove();
+				reqBySerial.remove(waiter.reqSerial);
 			}
 		}
 	}
@@ -274,20 +260,11 @@ public class RPCClient {
 	 * @throws IOException
 	 */
 	void handleReadable() throws IOException {
-		logger.debug("In handleReadable");
-//		ByteBuffer buf = readBuffers.getLast();
-//		if(buf.remaining() == 0) {
-//			buf = ByteBuffer.allocate(BUFFER_SIZE);
-//			readBuffers.add(buf);
-//		}
 		
 		// Read all available bytes from the socket into a list of ByteBuffers
 		while(true) {
-			logger.debug("hr1");
 			ByteBuffer buf = ByteBuffer.allocate(BUFFER_SIZE);
-			logger.debug("hr2");
 			int bytesRead = schan.read(buf);
-			logger.debug("hr bytesRead:" + bytesRead);
 			if(bytesRead == -1) {
 				throw new IOException("End of stream");
 			} else if(bytesRead == 0) {
@@ -302,8 +279,6 @@ public class RPCClient {
 					break;
 				}
 			}
-			
-			logger.debug("hr2.5");
 		}
 		// If any complete responses are in the incoming buffers, send them to
 		// the objects that are waiting for them.
@@ -317,83 +292,33 @@ public class RPCClient {
 	 * respective waiting payload objects.
 	 */
 	void dispatchResponses(List<ByteBuffer> readBufs) throws IOException {
-		InputStream is = null;
-		byte[] reqSerialBuf = null;
-		byte[] msgLenBuf = null;
 		logger.debug("dispatchResponses" + RPCUtil.strBufs(readBufs));
 		while(RPCUtil.hasCompleteMessage(readBufs)) {
-			if(is == null) {
-				is = new BBInputStream(readBufs);
-			}
-			if(reqSerialBuf == null) {
-				reqSerialBuf = new byte[Long.SIZE/8];
-			}
-			if(msgLenBuf == null) {
-				msgLenBuf = new byte[Integer.SIZE/8];
-			}
+			int msgLen = Util.bytesToInt(RPCUtil.extractBytes(INT_NBYTES, 
+					readBufs));
+			long reqSerial = Util.bytesToLong(RPCUtil.extractBytes(LONG_NBYTES,
+					readBufs));
 			
-			int nBytesRead = is.read(msgLenBuf);
-			assert nBytesRead == Integer.SIZE/8;
-			int msgLen = Util.bytesToInt(msgLenBuf);
-			
-			assert is.available() > msgLen;
-			is.read(reqSerialBuf);
-			long reqSerial = Util.bytesToLong(reqSerialBuf); 
-			byte[] response = new byte[msgLen]; // TODO GC pressure
-			is.read(response);
+			// Copy the message body to the waiting payload 
+			int bytesToCopy = msgLen - LONG_NBYTES;
+			List<ByteBuffer> response = RPCUtil.extractBufs(bytesToCopy, readBufs);
+			Waiter waiter;
 			synchronized(this) {
-				MPaxPayload payload = payloads.get(reqSerial);
-				if(payload != null) {
-					payloads.remove(reqSerial);
-					timeoutPq.remove(payload);
+				waiter = reqBySerial.remove(reqSerial);
+				if(waiter == null) {
+					logger.debug("Response for timed-out request (fine)");
+				} else {
+					boolean didRemove = reqByTimeout.remove(waiter);
+					assert didRemove;
 				}
-				payload.replResponses.ack(replica, response);
 			}
+			waiter.payload.replResponses.ack(replica, response);
 		}
 	}
-	
-//	/**
-//	 * Reset the input buffer to its pristine state: a list containing one empty
-//	 * ByteBuffer ready for reading.
-//	 */
-//	void resetReadBuffers() {
-//		ByteBuffer onlyBuffer;
-//		int numReadBuffers = readBuffers.size();
-//		if(numReadBuffers > 1) {
-//			onlyBuffer = readBuffers.get(0);
-//			onlyBuffer.clear();
-//			readBuffers.clear();
-//			readBuffers.add(onlyBuffer);
-//		} else if (numReadBuffers == 0) {
-//			onlyBuffer = ByteBuffer.allocate(BUFFER_SIZE);
-//			readBuffers.add(onlyBuffer);
-//		} else {
-//			readBuffers.get(0).clear();
-//		}
-//	}
-	
+
 	protected synchronized long getNextSerial() {
 		reqSerial++;
 		return reqSerial;
-	}
-	
-	/**
-	 * Given a byte array, write to the socket: 4 bytes of array length, then
-	 * the full array.
-	 */
-	void writeLengthPrefixed(byte[] bytes) throws IOException {
-		byte[] lengthBuf = Util.intToBytes(bytes.length);
-		ByteBuffer[] bufsToWrite = new ByteBuffer[] {
-				ByteBuffer.wrap(lengthBuf),
-				ByteBuffer.wrap(bytes)};
-		long nBytesWritten = schan.write(bufsToWrite);
-
-		logger.debug("RPC socket request sent nbytes: " + nBytesWritten);
-		logger.debug("Output length field: " + Arrays.toString(lengthBuf));
-		logger.debug("Output data field: " + Arrays.toString(bytes));
-		if(nBytesWritten != bytes.length + 4) {
-			throw new AssertionError();
-		}
 	}
 	
 	/**
@@ -402,21 +327,41 @@ public class RPCClient {
 	 * of the request that's timing out. This is that class. This is the type
 	 * of objects that go into the priority queue.
 	 */
-	static class TimeoutPair {
+	static class Waiter {
 		long finishTimeMs, reqSerial;
+		MPaxPayload payload;
 		
-		public TimeoutPair(long finishTimeMs, long reqSerial) {
+		public Waiter(long finishTimeMs, long reqSerial, MPaxPayload payload) {
 			this.finishTimeMs = finishTimeMs;
 			this.reqSerial = reqSerial;
+			this.payload = payload;
 		}
 		
 		/**
-		 * This comparator allows the PriorityQueue to sort in order of timeout:
-		 * the next object in the PQ will be the soonest request to timeout.
+		 * For Waiters to be stored in TreeSets correctly, equals() must be
+		 * consistent with the WaiterCmp comparator (below). This is easy, we
+		 * just say two Waiters are equal iff their fields are equal.
 		 */
-		static class TPComparator implements Comparator<TimeoutPair> {
-			public int compare(TimeoutPair l, TimeoutPair r) {
-				return Long.valueOf(l.finishTimeMs).compareTo(r.finishTimeMs);
+		public boolean equals(Waiter other) {
+			return (reqSerial == other.reqSerial) && 
+				(finishTimeMs == other.finishTimeMs);
+		}
+		
+		/**
+		 * This comparator allows the TreeSet to sort in order of timeout:
+		 * the first object in comparator order will be the soonest request to 
+		 * time out.
+		 */
+		static class WaiterCmp implements Comparator<Waiter> {
+			public int compare(Waiter l, Waiter r) {
+				// Order first by soonest finishing time
+				int finishCmpVal = 
+					Long.valueOf(l.finishTimeMs).compareTo(r.finishTimeMs);
+				if(finishCmpVal != 0) {
+					return finishCmpVal;
+				}
+				// If finishing times are equal, then break ties by reqSerial
+				return Long.valueOf(l.reqSerial).compareTo(r.reqSerial);
 			}
 		}
 	}

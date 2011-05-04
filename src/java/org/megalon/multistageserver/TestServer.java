@@ -88,11 +88,11 @@ public class TestServer {
 		public void setServer(MultiStageServer<SocketPayload> server) {}
 	}
 	
-	public static void main(String args[]) {
+	public static void main(String args[]) throws Exception {
 		new TestServer().run();
 	}
 	
-	void run() {
+	void run() throws Exception {
 		Set<Stage<SocketPayload>> stages = new HashSet<Stage<SocketPayload>>();
 		stages.add(firstStage);
 		stages.add(secondStage);

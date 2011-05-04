@@ -38,7 +38,7 @@ public class ReplServer {
 		this.megalon = megalon;
 	}
 	
-	public void init() throws IOException {
+	public void init() throws Exception {
 		logger.debug("Replication server init'ing");
 		wal = new WAL(megalon);
 

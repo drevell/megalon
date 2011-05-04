@@ -28,7 +28,7 @@ public class Megalon {
 	protected Map<Host,RPCClient> replSrvSockets =
 		new HashMap<Host,RPCClient>();
 	
-	public Megalon(Config config) throws IOException {
+	public Megalon(Config config) throws Exception {
 		ReplServer replServ = null;
 		Coord coord = null;
 		

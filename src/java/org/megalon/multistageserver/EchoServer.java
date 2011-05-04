@@ -25,7 +25,7 @@ MultiStageServer.Finisher<EchoServer.EchoPayload>
 	
 	EchoStage echoStage = new EchoStage();
 	
-	public EchoServer() {
+	public EchoServer() throws Exception {
 		echoStage = new EchoStage();
 		Set<Stage<EchoPayload>> stages = new HashSet<Stage<EchoPayload>>();
 		stages.add(echoStage);

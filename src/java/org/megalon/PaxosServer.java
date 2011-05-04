@@ -44,7 +44,7 @@ public class PaxosServer {
 	PaxosRespondStage respondStage;
 	WAL wal;
 	
-	public PaxosServer(Megalon megalon) {
+	public PaxosServer(Megalon megalon) throws Exception {
 		this.megalon = megalon;
 		this.wal = new WAL(megalon);
 		Set<Stage<MPaxPayload>> serverStages = new HashSet<Stage<MPaxPayload>>();
@@ -182,7 +182,7 @@ public class PaxosServer {
 		}
 
 		public int getNumConcurrent() {
-			return 1;
+			return 2;
 		}
 
 		public String getName() {
@@ -203,7 +203,7 @@ public class PaxosServer {
 			final DatumReader<AvroPrepareResponse> prepRespReader = 
 				new SpecificDatumReader<AvroPrepareResponse>(AvroPrepareResponse.class);
 			Decoder dec;
-			
+			throw new IOException("Accept stage not coded");
 			// Look for the highest n among a quorum of responses. This is just
 			// normal Paxos. We'll use this value in accept messages below.
 //			for(Entry<String,byte[]> e: payload.replResponses.responses.entrySet()) {
@@ -218,19 +218,18 @@ public class PaxosServer {
 //					
 //				}
 //			}
-			return null;
 		}
 
 		public int getNumConcurrent() {
-			return 0;
+			return 2;
 		}
 
 		public String getName() {
-			return null;
+			return this.getClass().getName();
 		}
 
 		public int getBacklogSize() {
-			return 0;
+			return 10;
 		}
 
 		public void setServer(MultiStageServer<MPaxPayload> server) {}
