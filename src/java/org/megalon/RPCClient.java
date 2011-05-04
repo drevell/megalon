@@ -36,10 +36,10 @@ import org.megalon.multistageserver.BBInputStream;
  * 
  * TODO update documentation
  */
-public class PaxosSocketMultiplexer {
+public class RPCClient {
 	public static final int BUFFER_SIZE = 16384;
 	public static final long reconnectAttemptIntervalMs = 5000;
-	Log logger = LogFactory.getLog(PaxosSocketMultiplexer.class);
+	Log logger = LogFactory.getLog(RPCClient.class);
 	
 	SocketChannel schan;
 	long reqSerial = 0;
@@ -63,7 +63,7 @@ public class PaxosSocketMultiplexer {
 //		}		
 //	}
 	
-	public PaxosSocketMultiplexer(Host host, String replica) {
+	public RPCClient(Host host, String replica) {
 		this.host = host;
 		this.replica = replica;
 		reader = new Thread() {
@@ -134,10 +134,10 @@ public class PaxosSocketMultiplexer {
 				schan.configureBlocking(false);
 				outBufs.clear();
 				readBuffers.clear();
-				logger.debug("Multiplexer connected to " + host);
+				logger.debug("RPCClient connected to " + host);
 				return true;
 			} catch (Exception e) {
-				logger.info("Multiplexer connection to " + host + 
+				logger.info("RPCClient connection to " + host + 
 						" had exception", e);
 				return false;
 			}

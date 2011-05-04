@@ -46,14 +46,13 @@ public class MPaxPayload extends Payload {
 		Stage<MPaxPayload> nextStage = null;
 		MultiStageServer<MPaxPayload> server = null;
 		int expectedResponses = 0;
-		Map<String, Object> responses = new ConcurrentHashMap<String, Object>();
+		Map<String, byte[]> responses = new ConcurrentHashMap<String, byte[]>();
 		boolean inited = false;
 		
 		protected ReplResponses() {}
 		
 		public void init(MultiStageServer<MPaxPayload> server, 
-				Stage<MPaxPayload> nextStage, int expectedResponses, 
-				boolean proceedOnQuorum) {
+				Stage<MPaxPayload> nextStage, int expectedResponses) {
 			this.server = server;
 			this.nextStage = nextStage;
 			this.expectedResponses = expectedResponses;
@@ -62,16 +61,16 @@ public class MPaxPayload extends Payload {
 		}
 		
 		/**
-		 * Called by the PaxosSocketMultiplexer when a valid response is received.
+		 * Called by the RPCClient when a valid response is received.
 		 */
-		synchronized public void ack(String replica, Object response) {
+		synchronized public void ack(String replica, byte[] response) {
 			assert inited;
 			responses.put(replica, response);
 			enqueueIfAllResponses();
 		}
 		
 		/**
-		 * Called be the PaxosSocketMultiplexer when a request times out.
+		 * Called be the RPCClient when a request times out.
 		 */
 		synchronized public void nack(String replica) {
 			assert inited;

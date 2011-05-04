@@ -64,7 +64,7 @@ public class RPCUtil {
 	}
 	
 	/**
-	 * For debugging only, log the contents of some bytebuffers.
+	 * For debugging only, get the contents of some bytebuffers as a String.
 	 */
 	static public String strBufs(List<ByteBuffer> bufs) {
 		StringBuilder sb = new StringBuilder();

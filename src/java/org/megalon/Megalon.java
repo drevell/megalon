@@ -25,8 +25,8 @@ public class Megalon {
 	
 	static Log logger = LogFactory.getLog(Megalon.class);
 	protected UUID uuid;
-	protected Map<Host,PaxosSocketMultiplexer> replSrvSockets =
-		new HashMap<Host,PaxosSocketMultiplexer>();
+	protected Map<Host,RPCClient> replSrvSockets =
+		new HashMap<Host,RPCClient>();
 	
 	public Megalon(Config config) throws IOException {
 		ReplServer replServ = null;
@@ -117,7 +117,7 @@ public class Megalon {
 		return coord;
 	}
 
-	public Map<Host, PaxosSocketMultiplexer> getReplSrvSockets() {
+	public Map<Host, RPCClient> getReplSrvSockets() {
 		return replSrvSockets;
 	}
 

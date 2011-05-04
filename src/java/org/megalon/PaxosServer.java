@@ -6,22 +6,29 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.DatumWriter;
+import org.apache.avro.io.Decoder;
+import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.Config.Host;
 import org.megalon.Config.ReplicaDesc;
+import org.megalon.avro.AvroAccept;
 import org.megalon.avro.AvroPrepare;
+import org.megalon.avro.AvroPrepareResponse;
 import org.megalon.messages.MegalonMsg;
 import org.megalon.multistageserver.MultiStageServer;
 import org.megalon.multistageserver.MultiStageServer.Finisher;
@@ -63,7 +70,6 @@ public class PaxosServer {
 	class PaxosPrepareStage implements Stage<MPaxPayload> {
 		// TODO this should use selected replica and not local replica
 		Log logger = LogFactory.getLog(PaxosPrepareStage.class);
-		
 		 
 		public NextAction<MPaxPayload> runStage(MPaxPayload payload) {
 			// Assumes the chosen replica is up to date, which it will be if we 
@@ -85,15 +91,12 @@ public class PaxosServer {
 
 			Collection<ReplicaDesc> replicas = megalon.config.replicas.values();
 			int numReplicas = replicas.size(); 
-			payload.replResponses.init(server, sendAcceptStage, numReplicas, true);
-			
-			// Remember the response from the local replica
-			payload.replResponses.ack(myReplica, payload.workingEntry);
+			payload.replResponses.init(server, sendAcceptStage, numReplicas-1);
 			
 			List<ByteBuffer> outBytes = encodedPrepare(payload.walIndex,
 					payload.workingEntry.n);
 			logger.debug("encodedPrepare gave" + RPCUtil.strBufs(outBytes));
-			PaxosSocketMultiplexer plexer;
+			RPCClient rpcCli;
 			List<ByteBuffer> outBytesThisRepl;
 			int numFailedReplicas = 0;
 			for(ReplicaDesc replicaDesc: replicas) {
@@ -104,8 +107,8 @@ public class PaxosServer {
 				for(Host host: (List<Host>)Util.shuffled(replicaDesc.replsrv)) {
 					outBytesThisRepl = duplicateBufferList(outBytes);
 					logger.debug("bytes this repl: " + RPCUtil.strBufs(outBytesThisRepl));
-					plexer = megalon.clientData.getReplSrvSocket(host);
-					aHostSucceeded |= plexer.write(outBytesThisRepl, payload);
+					rpcCli = megalon.clientData.getReplSrvSocket(host);
+					aHostSucceeded |= rpcCli.write(outBytesThisRepl, payload);
 					if(!aHostSucceeded) {
 						logger.debug("Host write failed: " + host);
 					}
@@ -193,8 +196,44 @@ public class PaxosServer {
 		public void setServer(MultiStageServer<MPaxPayload> server) { }
 	}
 	
-	class PaxosAcceptStage extends NoopStage {
-		
+	class PaxosAcceptStage implements Stage<MPaxPayload> {
+		public NextAction<MPaxPayload> runStage(MPaxPayload payload)
+				throws Exception {
+			// TODO pool/reuse
+			final DatumReader<AvroPrepareResponse> prepRespReader = 
+				new SpecificDatumReader<AvroPrepareResponse>(AvroPrepareResponse.class);
+			Decoder dec;
+			
+			// Look for the highest n among a quorum of responses. This is just
+			// normal Paxos. We'll use this value in accept messages below.
+//			for(Entry<String,byte[]> e: payload.replResponses.responses.entrySet()) {
+//				byte[] replicaBytes = e.getValue();
+//				
+//
+//				// Each response is either a byte array (remote replica response)
+//				// or a WALEntry (the local  
+//				if(valThisReplica.getClass().isArray()) {
+//					B
+//					Decoder dec = DecoderFactory.get().binaryDecoder(payload.is, dec);
+//					
+//				}
+//			}
+			return null;
+		}
+
+		public int getNumConcurrent() {
+			return 0;
+		}
+
+		public String getName() {
+			return null;
+		}
+
+		public int getBacklogSize() {
+			return 0;
+		}
+
+		public void setServer(MultiStageServer<MPaxPayload> server) {}
 	}
 	
 	class PaxosRespondStage extends NoopStage {

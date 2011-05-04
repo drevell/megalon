@@ -13,8 +13,8 @@ import org.megalon.Config.ReplicaDesc;
  * database, we want them to share TCP connections to replication servers.
  */
 public class ClientSharedData {
-	Map<Host,PaxosSocketMultiplexer> replServerSockets = 
-		new HashMap<Host,PaxosSocketMultiplexer>();
+	Map<Host,RPCClient> replServerSockets = 
+		new HashMap<Host,RPCClient>();
 	Megalon megalon;
 	
 	public ClientSharedData(Megalon megalon) {
@@ -24,7 +24,7 @@ public class ClientSharedData {
 	
 	/**
 	 * For each replication server that we know about (except this replica),
-	 * create a connection (a PaxosSocketMultiplexer).
+	 * create a connection (a RPCClient).
 	 */
 	protected void updateReplServerSockets() {
 		for(ReplicaDesc replDesc: megalon.config.replicas.values()) {
@@ -34,17 +34,17 @@ public class ClientSharedData {
 			for(Host host: replDesc.replsrv) {
 				if(!replServerSockets.containsKey(host)) {
 					replServerSockets.put(host, 
-							new PaxosSocketMultiplexer(host, replDesc.name));
+							new RPCClient(host, replDesc.name));
 				}
 			}
 		}
 	}
 	
 	/**
-	 * Get the PaxosSocketMultiplexer that is connected to a certain remote
+	 * Get the RPCClient that is connected to a certain remote
 	 * replication server.
 	 */
-	public PaxosSocketMultiplexer getReplSrvSocket(Host host) {
+	public RPCClient getReplSrvSocket(Host host) {
 		return replServerSockets.get(host);
 	}
 }
