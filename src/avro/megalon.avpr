@@ -49,9 +49,9 @@
             "name": "AvroPrepareResponse",
             "type": "record",
             "fields": [
-                {"name": "walEntry", "type": ["null", "AvroWALEntry"]},
-                //{"name": "reqSerial", "type": "long"},
-                {"name": "hadQuorum", "type": "boolean"}
+                {"name": "hadQuorum", "type": "boolean"},
+                {"name": "walEntry", "type": ["null", "AvroWALEntry"]}
+                //{"name": "reqSerial", "type": "long"}
             ]
         },
         {   

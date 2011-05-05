@@ -3,12 +3,16 @@ package org.megalon.multistageserver;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.LinkedList;
+import java.util.List;
 
-import org.apache.avro.util.ByteBufferInputStream;
 import org.apache.avro.util.ByteBufferOutputStream;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.megalon.multistageserver.SocketAccepter.PayloadFactory;
 
 public class SocketPayload extends Payload {
+	Log logger = LogFactory.getLog(SocketPayload.class);
+	
 	public SocketChannel sockChan;
 	public int bytesExpected = 0;
 	public boolean continueReading = false;
@@ -16,9 +20,7 @@ public class SocketPayload extends Payload {
 	public LinkedList<ByteBuffer> readBufs = new LinkedList<ByteBuffer>();
 	public BBInputStream is = null;
 	
-	public ByteBuffer[] pendingOutput = null;
-	public int curOutBuf;
-	public int outBytesRemaining;
+	public List<ByteBuffer> pendingOutput = null;
 	public ByteBufferOutputStream os = new ByteBufferOutputStream();
 	
 	public boolean timedOut;
@@ -39,15 +41,13 @@ public class SocketPayload extends Payload {
 	}
 	
 	public void resetForRead() {
-		while(readBufs.size() > 0 && readBufs.get(0).remaining() == 0) {
-			readBufs.remove(0);
-		}
-		for(ByteBuffer bb: readBufs) {
-			bb.flip();
+		if(!continueReading) {
+			logger.debug("resetForRead: clearing readBufs");
+			readBufs.clear();
+		} else {
+			logger.debug("resetForRead: not clearing readBufs");
 		}
 		pendingOutput = null;
-		curOutBuf = -1;
-		outBytesRemaining = -1;
 		os.reset();
 	}
 	

@@ -8,6 +8,7 @@ import org.apache.avro.io.DatumWriter;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.specific.SpecificDatumWriter;
+import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.avro.AvroAcceptResponse;
@@ -25,11 +26,6 @@ class AvroEncodeStage implements MultiStageServer.Stage<MSocketPayload> {
 	Stage<MSocketPayload> nextStage;
 	MultiStageServer<MReplPayload> server;
 
-	final DatumWriter<AvroPrepareResponse> prepareRespWriter = new 
-		SpecificDatumWriter<AvroPrepareResponse>(AvroPrepareResponse.class);
-	final DatumWriter<AvroAcceptResponse> acceptRespWriter = 
-		new SpecificDatumWriter<AvroAcceptResponse>(AvroAcceptResponse.class);
-
 	/**
 	 * No-arg constructor, the caller must call init() before using this object.
 	 */
@@ -43,36 +39,36 @@ class AvroEncodeStage implements MultiStageServer.Stage<MSocketPayload> {
 		this.nextStage = nextStage;
 	}
 	
-//	public void finish(MPayload mPayload) {
-//		SocketPayload sockPayload = (SocketPayload)sockPayload.getOuterPayload();
-//		server.enqueue(sockPayload, nextStage, mPayload.finisher);
-//	}
-
 	public NextAction<MSocketPayload> runStage(MSocketPayload mSockPayload) 
 	throws Exception {
-		Encoder enc = EncoderFactory.get().binaryEncoder(mSockPayload.os, null);
+		DatumWriter<AvroPrepareResponse> prepareRespWriter = new 
+			SpecificDatumWriter<AvroPrepareResponse>(AvroPrepareResponse.class);
+		DatumWriter<AvroAcceptResponse> acceptRespWriter = 
+			new SpecificDatumWriter<AvroAcceptResponse>(AvroAcceptResponse.class);
+
+		ByteBufferOutputStream os = mSockPayload.os;
+		Encoder enc = EncoderFactory.get().binaryEncoder(os, null);
 		logger.debug("AvroEncoder running");
 		if(mSockPayload.resp == null) {
 			logger.debug("Null response in payload");
 		} else {
 			try {
+				os.reset(); // Make sure output buffer is empty
 				boolean haveResponse = false;
 				switch(mSockPayload.reqType) {
 				case MegalonMsg.MSG_PREPARE:
-					logger.debug("Encoding prepare-response");
-					mSockPayload.os.write(
-							new byte[] {MegalonMsg.MSG_PREPARE_RESP});
+					logger.debug("Encoding prepare-response: " + mSockPayload.resp);
+					os.write(MegalonMsg.MSG_PREPARE_RESP);
 					AvroPrepareResponse avroPrepResp = 
 						((MsgPrepareResp)mSockPayload.resp).toAvro();
 					prepareRespWriter.write(avroPrepResp, enc);
 					haveResponse = true;
 					break;
 				case MegalonMsg.MSG_ACCEPT:
-					logger.debug("Encoding accept-response");
-					mSockPayload.os.write(
-							new byte[] {MegalonMsg.MSG_ACCEPT_RESP});
+					os.write(MegalonMsg.MSG_ACCEPT_RESP);
 					AvroAcceptResponse avroAccResp =
 						((MsgAcceptResp)(mSockPayload.resp)).toAvro();
+					logger.debug("Encoding accept-response: " + avroAccResp.acked);
 					acceptRespWriter.write(avroAccResp, enc);
 					haveResponse = true;
 					break;
@@ -83,25 +79,26 @@ class AvroEncodeStage implements MultiStageServer.Stage<MSocketPayload> {
 				}
 				if(haveResponse) {
 					enc.flush();
-					mSockPayload.os.flush();
-					
-					// Prepend the number of bytes to the output buffer
-					int numOutBytes = 0;
-					List<ByteBuffer> bbList = mSockPayload.os.getBufferList(); 
+					os.flush();
+
+					// Output format: nBytes, rpcSerial, body
+					int numOutBytes = Long.SIZE/8;
+					List<ByteBuffer> bbList = os.getBufferList();
+					logger.debug("Encoded response: " + 
+							RPCUtil.strBufs(bbList));
 					for(ByteBuffer bb: bbList ) {
 						numOutBytes += bb.remaining();
 					}
-					logger.debug("Prepending buffer length: " + numOutBytes);
-					mSockPayload.os.write(Util.intToBytes(numOutBytes));
-					mSockPayload.os.append(bbList); // efficient no-copy append
 					
-					mSockPayload.os.flush();
+					logger.debug("Writing buffer length: " + numOutBytes);
+					os.write(Util.intToBytes(numOutBytes));
+					logger.debug("Writing serial: " + mSockPayload.rpcSerial);
+					os.write(Util.longToBytes(mSockPayload.rpcSerial));
+					os.append(bbList); // efficient no-copy append
+					os.flush();
+					
 					return new NextAction<MSocketPayload>(Action.FORWARD, nextStage);
 				}
-//				logger.debug("To socketServer.enqueue()");
-//				socketServer.enqueue(sockPayload, selectorStage, 
-//						sockPayload.finisher);
-//				logger.debug("From socketServer.enqueue()");
 			} catch (IOException e) {
 				logger.warn("IOException writing Avro to buffer", e);
 			} catch (Exception e) {

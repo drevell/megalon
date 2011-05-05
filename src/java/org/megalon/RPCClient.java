@@ -1,15 +1,14 @@
 package org.megalon;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -37,7 +36,7 @@ import org.megalon.Config.Host;
  */
 public class RPCClient {
 	public static final int BUFFER_SIZE = 16384;
-	public static final long reconnectAttemptIntervalMs = 5000;
+	public static final long RECONNECT_WAIT_MS = 2000;
 	public static final int INT_NBYTES = Integer.SIZE / 8;
 	public static final int LONG_NBYTES = Long.SIZE / 8;
 	
@@ -89,7 +88,6 @@ public class RPCClient {
 		int length = 0;
 		for(ByteBuffer bb: outBufs) {
 			length += bb.remaining();
-			logger.debug("length " + length);
 		}
 		outBufs.add(0, ByteBuffer.wrap(Util.intToBytes(length)));
 		
@@ -98,6 +96,8 @@ public class RPCClient {
 		// Set up the caller to receive the response, when it arrives
 		synchronized(this) {
 			Waiter waiter = new Waiter(payload.finishTimeMs, reqSerial, payload);
+			logger.debug("Setting up waiter on " + replica + " for serial: " + 
+					reqSerial);
 			reqBySerial.put(reqSerial, waiter);
 			reqByTimeout.add(waiter);
 			this.outBufs.addAll(outBufs); // Add output to queue
@@ -125,11 +125,13 @@ public class RPCClient {
 				readBuffers.clear();
 				logger.debug("RPCClient connected to " + host);
 				return true;
+			} catch (ConnectException e) {
+				logger.debug("Connection to " + host + " failed: " + e.getMessage());
 			} catch (Exception e) {
 				logger.info("RPCClient connection to " + host + 
 						" had exception", e);
-				return false;
 			}
+			return false;
 		}
 	}
 	
@@ -138,6 +140,7 @@ public class RPCClient {
 	 * lose our connection to the remote server.
 	 */
 	synchronized void failAllOutstanding() {
+		logger.debug("Clearing all outstanding waiters");
 		for(Waiter waiter: reqByTimeout) {
 			reqBySerial.remove(waiter.reqSerial);
 			waiter.payload.replResponses.nack(this.replica);
@@ -161,7 +164,7 @@ public class RPCClient {
 					logger.debug("To reconnect");
 					if(!reconnect()) {
 						logger.debug("Reconnect failed, sleeping");
-						Util.sleep(5000);
+						Util.sleep(RECONNECT_WAIT_MS);
 						continue;
 					}
 				}
@@ -246,6 +249,7 @@ public class RPCClient {
 				if(waiter.finishTimeMs > nowTimeMs) {
 					break;
 				}
+				logger.debug("Replica " + replica + " timing out a waiter");
 				waiter.payload.replResponses.nack(replica);
 				
 				// Remove the timed out waiter from our tracking structures
@@ -260,7 +264,6 @@ public class RPCClient {
 	 * @throws IOException
 	 */
 	void handleReadable() throws IOException {
-		
 		// Read all available bytes from the socket into a list of ByteBuffers
 		while(true) {
 			ByteBuffer buf = ByteBuffer.allocate(BUFFER_SIZE);
@@ -275,7 +278,6 @@ public class RPCClient {
 				if(buf.limit() != buf.capacity()) {
 					// The last buffer we read was not filled, so there must not
 					// be any more bytes in the socket
-					
 					break;
 				}
 			}
@@ -292,27 +294,32 @@ public class RPCClient {
 	 * respective waiting payload objects.
 	 */
 	void dispatchResponses(List<ByteBuffer> readBufs) throws IOException {
-		logger.debug("dispatchResponses" + RPCUtil.strBufs(readBufs));
+		logger.debug("dispatchResponses: " + RPCUtil.strBufs(readBufs));
 		while(RPCUtil.hasCompleteMessage(readBufs)) {
+			logger.debug("Have a complete message");
 			int msgLen = Util.bytesToInt(RPCUtil.extractBytes(INT_NBYTES, 
 					readBufs));
 			long reqSerial = Util.bytesToLong(RPCUtil.extractBytes(LONG_NBYTES,
 					readBufs));
+			logger.debug("Dispatching a message, length=" + msgLen + 
+					" serial=" + reqSerial);
 			
 			// Copy the message body to the waiting payload 
 			int bytesToCopy = msgLen - LONG_NBYTES;
 			List<ByteBuffer> response = RPCUtil.extractBufs(bytesToCopy, readBufs);
+			logger.debug("Extracted response: " + RPCUtil.strBufs(response));
 			Waiter waiter;
 			synchronized(this) {
 				waiter = reqBySerial.remove(reqSerial);
 				if(waiter == null) {
 					logger.debug("Response for timed-out request (fine)");
 				} else {
+					logger.debug("Response for valid waiter");
 					boolean didRemove = reqByTimeout.remove(waiter);
 					assert didRemove;
+					waiter.payload.replResponses.ack(replica, response);
 				}
 			}
-			waiter.payload.replResponses.ack(replica, response);
 		}
 	}
 

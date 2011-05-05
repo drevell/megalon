@@ -15,6 +15,8 @@ import org.apache.commons.logging.LogFactory;
 public class BBInputStream extends ByteBufferInputStream {
 	int bytesRemaining;
 	Log logger = LogFactory.getLog(BBInputStream.class);
+	static final boolean traceEnabled = false;
+	
 	public BBInputStream(List<ByteBuffer> buffers) {
 		super(buffers);
 		bytesRemaining = 0;
@@ -25,7 +27,10 @@ public class BBInputStream extends ByteBufferInputStream {
 	}
 	
 	protected void logRemaining(String tag) {
-		logger.debug(tag + ": BBInputStream has " + bytesRemaining + " bytes remaining");
+		if(traceEnabled) {
+			logger.debug(tag + ": BBInputStream has " + bytesRemaining + 
+					" bytes remaining");
+		}
 	}
 
 	public int available() throws IOException {
@@ -35,10 +40,6 @@ public class BBInputStream extends ByteBufferInputStream {
 
 	public int read() throws IOException {
 		return super.read();
-//		int retVal = super.read(); 
-//		bytesRemaining -= Integer.SIZE;
-//		logStatus("read()");
-//		return retVal;
 	}
 	
 	public int read(byte[] b, int off, int len) throws IOException {
@@ -50,18 +51,10 @@ public class BBInputStream extends ByteBufferInputStream {
 
 	public ByteBuffer readBuffer(int length) throws IOException {
 		throw new IOException("readBuffer unsupported");
-//		ByteBuffer returnBuf = super.readBuffer(length);
-//		bytesRemaining -= returnBuf.remaining();
-//		logStatus("readBuffer");
-//		return returnBuf;
 	}
 
 	public int read(byte[] b) throws IOException {
 		return this.read(b, 0, b.length);
-//		int bytesRead = super.read(b);
-//		bytesRemaining -= bytesRead;
-//		logStatus("read(byte[])");
-//		return bytesRead;
 	}
 	
 	public synchronized void reset() throws IOException {

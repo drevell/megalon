@@ -1,5 +1,6 @@
 package org.megalon;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -28,12 +29,13 @@ public class RPCUtil {
 		if(readBufs == null || readBufs.size() == 0) {
 			return false;
 		}
+		
 		int totalBytesAvailable = 0;
 		for(ByteBuffer bb: readBufs) {
 			totalBytesAvailable += bb.remaining();
 		}
 
-		logger.debug("totalBytesAvailable: " + totalBytesAvailable);
+		//logger.debug("totalBytesAvailable: " + totalBytesAvailable);
 		if(totalBytesAvailable < RPC_HEADER_SIZE) {
 			// There aren't enough bytes for a header, so definitely no message
 			return false;
@@ -41,7 +43,7 @@ public class RPCUtil {
 		byte[] lengthBytes = new byte[4];
 		int bytesGotten = 0;
 		for(ByteBuffer bb: readBufs) {
-			logger.debug("Started a new buffer");
+			//logger.debug("Started a new buffer");
 			int startPos = bb.position();
 			int bytesRemainingToGet = 4 - bytesGotten;
 			int bytesAvailableThisBuffer = bb.remaining();
@@ -57,7 +59,7 @@ public class RPCUtil {
 					throw new IOException("Message was too short to contain " +
 							"required fields");
 				}
-				logger.debug("msgLengthField: " + msgLengthField);
+				//logger.debug("msgLengthField: " + msgLengthField);
 				return totalBytesAvailable-4 >= msgLengthField;
 			}
 		}
@@ -68,6 +70,9 @@ public class RPCUtil {
 	 * For debugging only, get the contents of some bytebuffers as a String.
 	 */
 	static public String strBufs(List<ByteBuffer> bufs) {
+		if(bufs == null) {
+			return "(null)";
+		}
 		StringBuilder sb = new StringBuilder();
 		for(ByteBuffer bb: bufs) {
 			ByteBuffer logBb = bb.duplicate();
@@ -109,8 +114,13 @@ public class RPCUtil {
 	throws IOException {
 		LinkedList<ByteBuffer> outBufs = new LinkedList<ByteBuffer>();
 		for(ByteBuffer bb: fromBufs) {
-			int nBytesThisBuffer = Math.min(nBytes, bb.remaining());
+			int remainingThisBuf = bb.remaining();
+			if(remainingThisBuf == 0) {
+				continue;
+			}
+			int nBytesThisBuffer = Math.min(nBytes, remainingThisBuf);
 			ByteBuffer newBb = bb.slice();
+			outBufs.add(newBb);
 			newBb.limit(newBb.position() + nBytesThisBuffer);
 			bb.position(bb.position() + nBytesThisBuffer);
 			nBytes -= nBytesThisBuffer;
@@ -118,7 +128,7 @@ public class RPCUtil {
 				return outBufs;
 			}
 		}
-		throw new IOException("Not enough bytes to extract");
+		throw new EOFException("Not enough bytes to extract");
 	}
 	
 	/**
@@ -126,7 +136,8 @@ public class RPCUtil {
 	 * n bytes. The positions of the ByteBuffers in the "from" list will advance 
 	 * past the bytes that have been "read."
 	 */
-	static byte[] extractBytes(int nBytes, List<ByteBuffer> fromBufs) throws IOException {
+	public static byte[] extractBytes(int nBytes, List<ByteBuffer> fromBufs) 
+	throws IOException {
 		byte[] outArr = new byte[nBytes];
 		int outIndex = 0;
 		for(ByteBuffer bb: fromBufs) {
@@ -138,6 +149,36 @@ public class RPCUtil {
 			}
 			outIndex += nBytesThisBuffer;
 		}
-		throw new IOException("Not enough bytes to extract");
+		throw new EOFException("Not enough bytes to extract");
+	}
+
+	public static long extractLong(List<ByteBuffer> fromBufs) throws IOException {
+		byte[] bytes = extractBytes(Long.SIZE/8, fromBufs);
+		return Util.bytesToLong(bytes);
+	}
+
+	public static int extractInt(List<ByteBuffer> fromBufs) throws IOException {
+		byte[] bytes = extractBytes(Integer.SIZE/8, fromBufs);
+		return Util.bytesToInt(bytes);
+	}
+	
+	public static byte extractByte(List<ByteBuffer> fromBufs) throws IOException {
+		for(ByteBuffer bb: fromBufs) {
+			if(bb.remaining() > 0) {
+				return bb.get();
+			}
+		}
+		throw new EOFException();
+	}
+	
+	/**
+	 * Given a list of ByteBuffers, return a list of ByteBuffer duplicate()s.
+	 */
+	public static List<ByteBuffer> duplicateBufferList(List<ByteBuffer> inList) {
+		List<ByteBuffer> outList = new LinkedList<ByteBuffer>();
+		for(ByteBuffer bb: inList) {
+			outList.add(bb.duplicate());
+		}
+		return outList;
 	}
 }

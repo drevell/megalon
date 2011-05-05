@@ -1,11 +1,14 @@
 package org.megalon;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.List;
 
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.specific.SpecificDatumReader;
+import org.apache.avro.util.ByteBufferInputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.avro.AvroAccept;
@@ -13,7 +16,6 @@ import org.megalon.avro.AvroPrepare;
 import org.megalon.messages.MegalonMsg;
 import org.megalon.messages.MsgAccept;
 import org.megalon.messages.MsgPrepare;
-import org.megalon.multistageserver.BBInputStream;
 import org.megalon.multistageserver.MultiStageServer;
 import org.megalon.multistageserver.MultiStageServer.Finisher;
 import org.megalon.multistageserver.MultiStageServer.NextAction;
@@ -92,6 +94,7 @@ Finisher<MReplPayload> {
 		while(true) {
 			try {
 				if(!RPCUtil.hasCompleteMessage(payload.readBufs)) {
+					payload.continueReading = true;
 					logger.debug("Don't have complete msg, back to selector");
 					return new NextAction<MSocketPayload>(Action.FORWARD, 
 						selectorStage);
@@ -101,10 +104,9 @@ Finisher<MReplPayload> {
 				return new NextAction<MSocketPayload>(Action.FINISHED, null);
 			}
 			logger.debug("Have >0 complete messages");
-			BBInputStream is = payload.is;
 
 			// Read the incoming msg length prefix, and sanity check it
-			int msgLen = RPCUtil.readInt(is);
+			int msgLen = RPCUtil.extractInt(payload.readBufs);
 			logger.debug("Incoming msgLen " + msgLen);
 			int minReqdBytes = RPCUtil.RPC_HEADER_SIZE-4; 
 			if(msgLen < minReqdBytes) {
@@ -118,18 +120,21 @@ Finisher<MReplPayload> {
 				logger.warn("ReplServer msg claimed to be huge. Closing.");
 				return new NextAction<MSocketPayload>(Action.FINISHED, null);
 			}
-			assert is.available() >= msgLen;
-
-			long reqSerial = RPCUtil.readLong(is);
-
-			byte[] msgType = new byte[1];
-			is.read(msgType);
-			Decoder dec = 
-				DecoderFactory.get().binaryDecoder(payload.is, null);
-			MReplPayload newPayload = new MReplPayload(msgType[0], payload);
-			newPayload.reqSerial = reqSerial;
 			
-			switch(msgType[0]) {
+			payload.rpcSerial = RPCUtil.extractLong(payload.readBufs);
+			logger.debug("Incoming request serial is " + payload.rpcSerial);
+			
+			List<ByteBuffer> msg = RPCUtil.extractBufs(msgLen-Long.SIZE/8, 
+					payload.readBufs);
+			logger.debug("Extracted msg is: " + RPCUtil.strBufs(msg));
+
+			byte msgType = RPCUtil.extractByte(msg);
+			ByteBufferInputStream msgIs = new ByteBufferInputStream(msg);
+			Decoder dec = 
+				DecoderFactory.get().binaryDecoder(msgIs, null);
+			MReplPayload newPayload = new MReplPayload(msgType, payload);
+			
+			switch(msgType) {
 			case MegalonMsg.MSG_PREPARE:
 				// TODO reuse avro obj here?
 				AvroPrepare avroPrepare = prepareReader.read(null, dec);
@@ -146,7 +151,7 @@ Finisher<MReplPayload> {
 				return new NextAction<MSocketPayload>(Action.IGNORE, null);
 			default:
 				logger.warn("Repl server saw unexpected message type: " +
-						msgType[0]);
+						msgType);
 				return new NextAction<MSocketPayload>(Action.FINISHED, null);
 				
 			}

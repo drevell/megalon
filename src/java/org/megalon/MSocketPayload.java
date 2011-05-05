@@ -1,6 +1,5 @@
 package org.megalon;
 
-import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 
 import org.megalon.messages.MegalonMsg;
@@ -31,4 +30,15 @@ public class MSocketPayload extends SocketPayload {
 		public MSocketPayload makePayload(SocketChannel sockChan) {
 			return new MSocketPayload(sockChan);
 		}
-	}}
+	}
+	
+//	public boolean acceptIfComplete(List<ByteBuffer> msg) throws IOException {
+//		if(RPCUtil.hasCompleteMessage(msg)) {
+//			this.is = new BBInputStream(msg);
+//			return true;
+//		} else {
+//			return false;
+//		}
+//	}
+	
+}

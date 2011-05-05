@@ -6,6 +6,10 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.avro.AvroWriteVal;
 
+/**
+ * A SingleWrite represents a single changed value in a transaction. A
+ * transaction contains a list of these.
+ */
 public class SingleWrite {
 	Log logger = LogFactory.getLog(SingleWrite.class);
 	final byte[] table, cf, col, value;

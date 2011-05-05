@@ -38,8 +38,8 @@ public class Util {
 			
 		long l = 0;
 		for(int i=0; i<8; i++) {
-			l += bs[i];
 			l <<= 8;
+			l += bs[i];
 		}
 		return l;
 	}
@@ -103,7 +103,7 @@ public class Util {
 	 * Sleep for some milliseconds, resuming if interrupted.
 	 * TODO replace other calls to sleep() with this function
 	 */
-	static public void sleep(int millis) {
+	static public void sleep(long millis) {
 		long startTimeMs = System.currentTimeMillis();
 		while(true) {
 			try {

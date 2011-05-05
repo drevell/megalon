@@ -19,12 +19,10 @@ import org.megalon.multistageserver.MultiStageServer.NextAction.Action;
  */
 public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPayload> {
 	Log logger = LogFactory.getLog(ReplRemoteHandlerStage.class);
-//	Stage<MPayload> nextStage;
 	MultiStageServer<MReplPayload> server;
 	WAL wal;
 	
 	public ReplRemoteHandlerStage(WAL wal) {
-//		this.nextStage = nextStage;
 		this.wal = wal;
 	}
 	
@@ -49,7 +47,9 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPaylo
 			try {
 				result = wal.acceptLocal(accMsg.walIndex, 
 						accMsg.walEntry);
+				logger.debug("Repl core: acceptLocal returned " + result);
 			} catch (IOException e) {
+				logger.warn("Repl core: acceptLocal exception", e);
 				result = false;
 			}
 			payload.resp = new MsgAcceptResp(result);

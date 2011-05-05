@@ -67,13 +67,7 @@ public class Megalon {
 	public static void main(String[] args) throws Exception {
 		Options options = new Options();
 		options.addOption(OPT_NODAEMON, false, "Run in the foreground");
-//		options.addOption(REPL_OPT, false, 
-//				"Whether to run the replication server component");
-//		options.addOption(COORD_OPT, false, 
-//				"Whether to run the coordinator component");
-//		options.addOption(CONF_OPT, true, 
-//				"Where to find the megalon config file");
-//		
+
 		CommandLineParser parser = new PosixParser();
 		CommandLine parsedArgs = null;
 		try {

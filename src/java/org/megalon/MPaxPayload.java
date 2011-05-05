@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.megalon.multistageserver.MultiStageServer;
 import org.megalon.multistageserver.MultiStageServer.Stage;
 import org.megalon.multistageserver.Payload;
@@ -14,11 +16,12 @@ import org.megalon.multistageserver.Payload;
  * agreement among the replicas. It's passed between stages of the Paxos server. 
  */
 public class MPaxPayload extends Payload {
-	WALEntry requestedEntry; // The original value proposed by the client
+	Log logger = LogFactory.getLog(MPaxPayload.class);	
 
+	WALEntry requestedEntry; // The original value proposed by the client
 	// We may end up preparing/accepting a value other than the one proposed by 
 	// the client, if another client is also vying for this log position
-	boolean usedExisting = false; 
+	boolean usedOtherEntry = false; 
 	WALEntry workingEntry; 
 	long walIndex;
 	ReplResponses replResponses = new ReplResponses();
@@ -26,6 +29,7 @@ public class MPaxPayload extends Payload {
 	boolean committed = false;
 	long finishTimeMs;
 	String eg;
+	int commitTries = 0;
 	
 	public MPaxPayload(String eg, WALEntry walEntry, long walIndex, long timeout) {
 		this.eg = eg;
@@ -49,6 +53,7 @@ public class MPaxPayload extends Payload {
 		Map<String, List<ByteBuffer>> responses = 
 			new HashMap<String, List<ByteBuffer>>();
 		boolean inited = false;
+		boolean acceptAckLocal;
 		
 		protected ReplResponses() {}
 		
@@ -59,6 +64,7 @@ public class MPaxPayload extends Payload {
 			this.expectedResponses = expectedResponses;
 			this.responses.clear();
 			this.inited = true;
+			this.acceptAckLocal = false;
 		}
 		
 		/**
@@ -66,6 +72,8 @@ public class MPaxPayload extends Payload {
 		 */
 		synchronized public void ack(String replica, List<ByteBuffer> response) {
 			assert inited;
+			logger.debug("Ack from " + replica + " with: " + 
+					RPCUtil.strBufs(response));
 			responses.put(replica, response);
 			enqueueIfAllResponses();
 		}
@@ -75,6 +83,7 @@ public class MPaxPayload extends Payload {
 		 */
 		synchronized public void nack(String replica) {
 			assert inited;
+			logger.debug("Nack from " + replica);
 			responses.put(replica, null);
 			enqueueIfAllResponses();
 		}

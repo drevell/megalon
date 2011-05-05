@@ -7,11 +7,9 @@ import org.megalon.multistageserver.SocketAccepter.PayloadFactory;
 
 /**
  * This class makes it easy to create a socket server. It assumes you already
- * have some server that implements the core server logic but 
- * @author david
- *
- * @param <T>
- */
+ * have some server that implements the core server logic. Just pass some
+ * information about your server to the constructor, and it will be called when
+ * there's a new socket connection. */
 public class SocketServer<T extends SocketPayload> extends MultiStageServer<T> {
 	SocketAccepter<T> accepter;
 	SelectorStage<T> selectorStage;
