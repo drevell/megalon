@@ -33,7 +33,7 @@ public class SimpleWrite {
 		Thread.sleep(1000);
 		proposer.write("table!".getBytes(), "cf!".getBytes(), "col!".getBytes(),
 				"value!".getBytes());
-		if(proposer.commitSync("myentitygroup!", 1000)) {
+		if(proposer.commitSync("myentitygroup!".getBytes(), 1000)) {
 			logger.info("Transaction committed!");
 		} else {
 			logger.info("Transaction failed to commit!");

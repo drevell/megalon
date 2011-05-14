@@ -15,6 +15,7 @@ public class SingleWrite {
 	final byte[] table, cf, col, value;
 	
 	public SingleWrite(AvroWriteVal singleVal) {
+		// TODO should limit() really be remaining()?
 		table = new byte[singleVal.table.limit()];
 		cf = new byte[singleVal.cf.limit()];
 		col = new byte[singleVal.col.limit()];

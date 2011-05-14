@@ -11,6 +11,7 @@ import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificDatumWriter;
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -67,9 +68,11 @@ public class WAL {
 		}
 	}
 
-	synchronized public WALEntry read(long walIndex) throws IOException {
+	synchronized public WALEntry read(byte[] entityGroup, long walIndex) 
+	throws IOException {
 		requireHtableConnected();
-		Get get = new Get(Util.longToBytes(walIndex));
+		byte[] row = ArrayUtils.addAll(entityGroup, Util.longToBytes(walIndex));
+		Get get = new Get(row);
 		get.addColumn(cf, ENTRY_BYTES);
 
 		Result result = htable.get(get);
@@ -98,13 +101,13 @@ public class WAL {
 	 *         existing log message, which also means Paxos NACK.
 	 * @throws IOException
 	 */
-	synchronized public WALEntry prepareLocal(long walIndex, long n)
-			throws IOException {
+	synchronized public WALEntry prepareLocal(byte[] entityGroup, long walIndex,
+	long n) throws IOException {
 		requireHtableConnected();
 		int tries = 0;
 		while (true) {
 			try {
-				WALEntry existingEntry = read(walIndex);
+				WALEntry existingEntry = read(entityGroup, walIndex);
 				// Read the preexisting log entry, see if we should supersede it
 				if (existingEntry != null) {
 					if (!(existingEntry.status == WALEntry.Status.PREPARED && existingEntry.n < n)) {
@@ -117,7 +120,7 @@ public class WAL {
 						WALEntry.Status.PREPARED);
 
 				// CAS: require that no one wrote since we read.
-				putWAL(walIndex, newEntry, true, null);
+				putWAL(entityGroup, walIndex, newEntry, true, null);
 				return null;
 			} catch (CasChanged e) {
 				tries++;
@@ -134,9 +137,9 @@ public class WAL {
 	 * Like {@link #putWAL(long, WALEntry, WALEntry)}, but writes blindly
 	 * without doing a compare-and-swap check.
 	 */
-	synchronized protected void putWAL(long walIndex, WALEntry entry)
-			throws IOException {
-		putWAL(walIndex, entry, false, null);
+	synchronized protected void putWAL(byte[] entityGroup, long walIndex, 
+	WALEntry entry) throws IOException {
+		putWAL(entityGroup, walIndex, entry, false, null);
 	}
 
 	/**
@@ -149,19 +152,19 @@ public class WAL {
 	 *            equal to casCheckEntry.n . Pass "null" to require that the
 	 *            database value not exist.
 	 */
-	synchronized protected void putWAL(long walIndex, WALEntry entry,
-			boolean doCasCheck, WALEntry casCheckEntry) throws IOException {
+	synchronized protected void putWAL(byte[] entityGroup, long walIndex, 
+	WALEntry entry, boolean doCasCheck, WALEntry casCheckEntry) throws IOException {
 		requireHtableConnected();
 
 		ByteArrayOutputStream bao = new ByteArrayOutputStream();
 		BinaryEncoder e = EncoderFactory.get().binaryEncoder(bao, null);
-		byte[] walIndexBytes = Util.longToBytes(walIndex);
-
+		
 		writer.write(entry.toAvro(), e);
 		e.flush();
 		byte[] serializedWALEntry = bao.toByteArray();
 
-		Put put = new Put(walIndexBytes);
+		byte[] row = ArrayUtils.addAll(entityGroup, Util.longToBytes(walIndex)); 
+		Put put = new Put(row);
 		put.add(cf, ENTRY_BYTES, serializedWALEntry);
 		put.add(cf, N_BYTES, Util.longToBytes(entry.n));
 		if (doCasCheck) {
@@ -173,7 +176,7 @@ public class WAL {
 			} else {
 				casNBytes = Util.longToBytes(casCheckEntry.n);
 			}
-			if (!htable.checkAndPut(walIndexBytes, cf, N_BYTES, casNBytes, put)) {
+			if (!htable.checkAndPut(row, cf, N_BYTES, casNBytes, put)) {
 				throw new CasChanged();
 			}
 		} else {
@@ -187,18 +190,18 @@ public class WAL {
 	 * @return true if the entry had the highest n seen yet and was written to
 	 *         the WAL. false otherwise.
 	 */
-	synchronized protected boolean acceptLocal(long walIndex, WALEntry entry)
-			throws IOException {
+	synchronized protected boolean acceptLocal(byte[] entityGroup, long walIndex,
+	WALEntry entry) throws IOException {
 		requireHtableConnected();
 
 		int tries = 0;
 		while (true) {
 			try {
-				WALEntry existingEntry = read(walIndex);
+				WALEntry existingEntry = read(entityGroup, walIndex);
 				if (existingEntry != null && existingEntry.n > entry.n) {
 					return false;
 				} else {
-					putWAL(walIndex, entry, true, existingEntry);
+					putWAL(entityGroup, walIndex, entry, true, existingEntry);
 					return true;
 				}
 			} catch (CasChanged e) {

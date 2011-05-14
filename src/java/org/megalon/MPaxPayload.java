@@ -24,14 +24,15 @@ public class MPaxPayload extends Payload {
 	boolean usedOtherEntry = false; 
 	WALEntry workingEntry; 
 	long walIndex;
+	
 	ReplResponses replResponses = new ReplResponses();
 	boolean isFinished = false;
 	boolean committed = false;
 	long finishTimeMs;
-	String eg;
+	byte[] eg;
 	int commitTries = 0;
 	
-	public MPaxPayload(String eg, WALEntry walEntry, long walIndex, long timeout) {
+	public MPaxPayload(byte[] eg, WALEntry walEntry, long walIndex, long timeout) {
 		this.eg = eg;
 		this.requestedEntry = walEntry;
 		this.workingEntry = walEntry;

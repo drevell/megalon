@@ -42,7 +42,7 @@ public class PaxosProposer {
 	 * @param timeoutMs The transaction will fail automatically after this many
 	 * milliseconds.
 	 */
-	public boolean commitSync(String eg, long timeoutMs) {
+	public boolean commitSync(byte[] eg, long timeoutMs) {
 		WALEntry walEntry = new WALEntry(queuedWrites);
 		Future<Boolean> f = paxosServer.commit(walEntry, eg, timeoutMs);
 		try {
@@ -66,7 +66,7 @@ public class PaxosProposer {
 	 * @return a Future that will eventually tell whether the transaction
 	 * succeeded.
 	 */
-	public Future<Boolean> commitAsync(String eg, long timeoutMs) {
+	public Future<Boolean> commitAsync(byte[] eg, long timeoutMs) {
 		WALEntry walEntry = new WALEntry(queuedWrites);
 		return paxosServer.commit(walEntry, eg, timeoutMs);
 	}

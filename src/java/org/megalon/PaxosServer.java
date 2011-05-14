@@ -65,7 +65,7 @@ public class PaxosServer {
 		this.server = new MultiStageServer<MPaxPayload>(serverStages);
 	}
 	
-	public Future<Boolean> commit(WALEntry walEntry, String eg, 
+	public Future<Boolean> commit(WALEntry walEntry, byte[] eg, 
 			long timeoutMs) {
 		long walIndex = 0; // TODO this should be set by a read
 		MPaxPayload payload = new MPaxPayload(eg, walEntry, walIndex, timeoutMs);
@@ -83,7 +83,7 @@ public class PaxosServer {
 			WALEntry existingEntry;
 			payload.workingEntry.n = 1;
 			try {
-				existingEntry = wal.prepareLocal(payload.walIndex,
+				existingEntry = wal.prepareLocal(payload.eg, payload.walIndex,
 						payload.workingEntry.n);
 			} catch(IOException e) {
 				return new NextAction<MPaxPayload>(Action.FINISHED, null);
@@ -98,8 +98,8 @@ public class PaxosServer {
 			int numReplicas = replicas.size(); 
 			payload.replResponses.init(server, sendAcceptStage, numReplicas-1);
 			
-			List<ByteBuffer> outBytes = encodedPrepare(payload.walIndex,
-					payload.workingEntry.n);
+			List<ByteBuffer> outBytes = encodedPrepare(payload.eg, 
+					payload.walIndex, payload.workingEntry.n);
 			logger.debug("encodedPrepare gave" + RPCUtil.strBufs(outBytes));
 			int numFailedReplicas = sendToRemoteReplicas(replicas, outBytes, payload);
 
@@ -125,10 +125,11 @@ public class PaxosServer {
 
 		public void setServer(MultiStageServer<MPaxPayload> server) {}
 
-		List<ByteBuffer> encodedPrepare(long walIndex, long n) {
+		List<ByteBuffer> encodedPrepare(byte[] eg, long walIndex, long n) {
 			AvroPrepare avroPrepare = new AvroPrepare();
 			avroPrepare.walIndex = walIndex;
 			avroPrepare.n = n;
+			avroPrepare.entityGroup = ByteBuffer.wrap(eg);
 			// TODO share/reuse/pool these objects, GC pressure
 			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
 			bbos.write(MegalonMsg.MSG_PREPARE);
@@ -201,15 +202,15 @@ public class PaxosServer {
 				return new NextAction<MPaxPayload>(Action.FINISHED, null);
 			}
 			logger.debug("Quorum! Best entry among replicas:" + payload.workingEntry);
-			List<ByteBuffer> outBytes = encodedAccept(payload.workingEntry, 
-					payload.walIndex);
+			List<ByteBuffer> outBytes = encodedAccept(payload.eg, 
+					payload.workingEntry, payload.walIndex);
 			
 			payload.replResponses.init(server, respondStage, numReplicas-1);
 			
 			// The local replica's response is kept separate from the others
 			// for convenience of decoding/encoding avro from remote replicas.
 			payload.replResponses.acceptAckLocal = 
-				wal.acceptLocal(payload.walIndex, payload.workingEntry);
+				wal.acceptLocal(payload.eg, payload.walIndex, payload.workingEntry);
 			
 			int numFailedReplicas = sendToRemoteReplicas(replicas, outBytes, payload);
 			if(numFailedReplicas >= Util.quorumImpossible(numReplicas)) {
@@ -220,8 +221,8 @@ public class PaxosServer {
 			}
 		}
 		
-		List<ByteBuffer> encodedAccept(WALEntry entry, long walIndex) {
-			MsgAccept msgAccept = new MsgAccept(entry, walIndex);
+		List<ByteBuffer> encodedAccept(byte[] eg, WALEntry entry, long walIndex) {
+			MsgAccept msgAccept = new MsgAccept(entry, walIndex, eg);
 			AvroAccept avroAccept = msgAccept.toAvro();
 			// TODO share/reuse/pool these objects, GC pressure
 			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
@@ -311,7 +312,7 @@ public class PaxosServer {
 			if(numAcks >= Util.quorum(numReplicas)) {
 				logger.debug("Quorum of accept-responses!");
 				payload.workingEntry.status = Status.CHOSEN;
-				wal.putWAL(payload.walIndex, payload.workingEntry);
+				wal.putWAL(payload.eg, payload.walIndex, payload.workingEntry);
 			} else {
 				logger.debug("Accept-response quorum failed");
 				if(payload.commitTries < MAX_COMMIT_TRIES) {

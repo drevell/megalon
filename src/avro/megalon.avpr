@@ -30,7 +30,6 @@
             "fields": [
                 {"name": "n", "type": "long"},
                 {"name": "status", "type": "AvroWALEntryStatus"},
-                //{"name": "walIndex", "type": "long"},
                 {"name": "values", "type": [{"type": "array", "items": "AvroWriteVal"}, "null"]}
             ]
         },
@@ -41,8 +40,8 @@
             "type": "record",
             "fields": [
                 {"name": "n", "type": "long"},
-                //{"name": "reqSerial", "type": "long"},
-                {"name": "walIndex", "type": "long"}
+                {"name": "walIndex", "type": "long"},
+                {"name": "entityGroup", "type": "bytes"}
             ]
         },
         {
@@ -51,7 +50,6 @@
             "fields": [
                 {"name": "hadQuorum", "type": "boolean"},
                 {"name": "walEntry", "type": ["null", "AvroWALEntry"]}
-                //{"name": "reqSerial", "type": "long"}
             ]
         },
         {   
@@ -59,7 +57,7 @@
             "type": "record",
             "fields": [
                 {"name": "walEntry", "type": "AvroWALEntry"},
-                //{"name": "reqSerial", "type": "long"},
+                {"name": "entityGroup", "type": "bytes"},
                 {"name": "walIndex", "type": "long"}
             ]
         },
@@ -67,24 +65,9 @@
             "name": "AvroAcceptResponse",
             "type": "record",
             "fields": [
-                //{"name": "reqSerial", "type": "long"},
-                //{"name": "ackOrNack", "type": "AvroAckOrNack"}
                 {"name": "acked", "type": "boolean"}
             ]
         }
     ]
-
-//    "messages": {
-//        "prepare": {
-//            "request": [{"name": "n", "type": "long"}, 
-//                        {"name": "walIndex", "type": "long"}],
-//            "response": ["null", "AvroWALEntry"]
-//        },
-//        "accept": {
-//            "request": [{"name": "state", "type": "AvroWALEntry"}, 
-//                        {"name": "walIndex", "type": "long"}],
-//            "response": "boolean"
-//        }
-    }
 }
 

@@ -34,7 +34,7 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPaylo
 			WALEntry entry = null;
 			try {
 				logger.debug("To wal.prepareLocal()");
-				entry = wal.prepareLocal(prepMsg.walIndex, prepMsg.n);
+				entry = wal.prepareLocal(prepMsg.entityGroup, prepMsg.walIndex, prepMsg.n);
 			} catch (IOException e) {
 				logger.debug("IOException in WAL prepareLocal");
 				entry = null;
@@ -45,7 +45,7 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPaylo
 			MsgAccept accMsg = (MsgAccept)payload.req;
 			boolean result;
 			try {
-				result = wal.acceptLocal(accMsg.walIndex, 
+				result = wal.acceptLocal(accMsg.entityGroup, accMsg.walIndex, 
 						accMsg.walEntry);
 				logger.debug("Repl core: acceptLocal returned " + result);
 			} catch (IOException e) {
