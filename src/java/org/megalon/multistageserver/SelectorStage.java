@@ -87,6 +87,10 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 	}
 
 	class SelectThread extends Thread {
+		public SelectThread() {
+			this.setDaemon(true);
+		}
+		
 		public void run() {
 			long lastIOErrMsgTime = 0;
 			while(true) {
