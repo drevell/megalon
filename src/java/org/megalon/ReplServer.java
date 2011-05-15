@@ -2,11 +2,23 @@ package org.megalon;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
+import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.megalon.avro.AvroAccept;
+import org.megalon.avro.AvroAcceptResponse;
+import org.megalon.avro.AvroPrepare;
+import org.megalon.avro.AvroPrepareResponse;
+import org.megalon.messages.MegalonMsg;
+import org.megalon.messages.MsgAccept;
+import org.megalon.messages.MsgAcceptResp;
+import org.megalon.messages.MsgPrepare;
+import org.megalon.messages.MsgPrepareResp;
 import org.megalon.multistageserver.MultiStageServer;
 import org.megalon.multistageserver.MultiStageServer.Stage;
 import org.megalon.multistageserver.SelectorStage;
@@ -23,15 +35,19 @@ public class ReplServer {
 	Megalon megalon;
 	InetSocketAddress proxyTo;
 	WAL wal;
-	MultiStageServer<MReplPayload> coreServer;
+//	MultiStageServer<MReplPayload> coreServer;
+	MultiStageServer<MPayload> coreServer;
 	final SocketAccepter<MSocketPayload> socketAccepter = 
 		new SocketAccepter<MSocketPayload>();
 	MultiStageServer<MSocketPayload> socketServer;
 	boolean ready = false;
-	Stage<MReplPayload> execStage;
-	Stage<MSocketPayload> selectorStage;
-	AvroDecodeStage avroDecodeStage; 
-	AvroEncodeStage avroEncodeStage; 
+//	Stage<MReplPayload> execStage;
+	Stage<MPayload> execStage;
+	SelectorStage<MSocketPayload> selectorStage;
+//	AvroDecodeStage avroDecodeStage; 
+	AvroRpcDecode avroDecodeStage; 
+//	AvroEncodeStage avroEncodeStage; 
+	AvroRpcEncode avroEncodeStage; 
 	PaxosProposer paxos;
 	
 	public ReplServer(Megalon megalon) throws IOException {
@@ -44,22 +60,46 @@ public class ReplServer {
 
 		// The coreServer contains the stages that are the same regardless of 
 		// whether the request arrived by socket or by function call.
-		Set<Stage<MReplPayload>> coreStages = new HashSet<Stage<MReplPayload>>();
+//		Set<Stage<MReplPayload>> coreStages = new HashSet<Stage<MReplPayload>>();
+		Set<Stage<MPayload>> coreStages = new HashSet<Stage<MPayload>>();
 		execStage = new ReplRemoteHandlerStage(wal);
 		coreStages.add(execStage);
-		coreServer = new MultiStageServer<MReplPayload>(coreStages);
+//		coreServer = new MultiStageServer<MReplPayload>(coreStages);
+		coreServer = new MultiStageServer<MPayload>(coreStages);
 		
 		// The socketServer contains the stages that only run for socket
 		// connections. The socketServer hands off requests to coreServer to
 		// do the actual database operations.
 		Set<Stage<MSocketPayload>> socketSvrStages = 
 			new HashSet<Stage<MSocketPayload>>();
-		avroDecodeStage = new AvroDecodeStage();
+//		avroDecodeStage = new AvroDecodeStage();
+		avroDecodeStage = new AvroRpcDecode();
 		selectorStage = new SelectorStage<MSocketPayload>(avroDecodeStage, 
 				"replSelectorStage", 1, 50);
-		avroEncodeStage = new AvroEncodeStage(selectorStage);
-		avroDecodeStage.init(avroEncodeStage, coreServer, 
-				execStage, selectorStage);
+		
+		// Set up the mapping from megalon response messages to avro messages
+		Map<Class<? extends MegalonMsg>, Class<? extends SpecificRecordBase>> respMsgMap = 
+			new HashMap<Class<? extends MegalonMsg>, Class<? extends SpecificRecordBase>>();
+		respMsgMap.put(MsgPrepareResp.class, AvroPrepareResponse.class);
+		respMsgMap.put(MsgAcceptResp.class, AvroAcceptResponse.class);
+		
+		avroEncodeStage = new AvroRpcEncode(selectorStage, respMsgMap, 10, 10);
+		
+		// For the Avro decoder, set up the mapping from message id to avro type
+		Map<Byte,Class<? extends SpecificRecordBase>> msgTypes = new 
+			HashMap<Byte,Class<? extends SpecificRecordBase>>();
+		msgTypes.put(MsgPrepare.MSG_ID, AvroPrepare.class);
+		msgTypes.put(MsgAccept.MSG_ID, AvroAccept.class);
+		
+		// For the Avro decoder, set up the mapping from avro type to megalon type
+		Map<Class<? extends SpecificRecordBase>,Class<? extends MegalonMsg>> decClassMap = 
+			new HashMap<Class<? extends SpecificRecordBase>,Class<? extends MegalonMsg>>();
+		decClassMap.put(AvroPrepare.class, MsgPrepare.class);
+		decClassMap.put(AvroAccept.class, MsgAccept.class);
+		
+		avroDecodeStage.init(msgTypes, decClassMap, coreServer, execStage, 
+				selectorStage, avroEncodeStage, 10, 10);
+		
 		socketSvrStages.add(selectorStage);
 		socketSvrStages.add(avroEncodeStage);
 		socketSvrStages.add(avroDecodeStage);
@@ -84,13 +124,12 @@ public class ReplServer {
 							megalon.config.replsrv_port);
 					socketAccepter.runForever();
 				} catch (Exception e) {
-					logger.warn("ReplServer accepter exception", e);
+					logger.error("ReplServer accepter exception", e);
 				}
 			}
 		};
 		accepterThread.setDaemon(true);
 		accepterThread.start();
-		logger.debug("Replication server accepter thread running");
 	}
 	
 	public boolean isReady() {

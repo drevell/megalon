@@ -32,8 +32,10 @@ import org.megalon.avro.AvroAccept;
 import org.megalon.avro.AvroAcceptResponse;
 import org.megalon.avro.AvroPrepare;
 import org.megalon.avro.AvroPrepareResponse;
-import org.megalon.messages.MegalonMsg;
 import org.megalon.messages.MsgAccept;
+import org.megalon.messages.MsgAcceptResp;
+import org.megalon.messages.MsgPrepare;
+import org.megalon.messages.MsgPrepareResp;
 import org.megalon.multistageserver.BBInputStream;
 import org.megalon.multistageserver.MultiStageServer;
 import org.megalon.multistageserver.MultiStageServer.Finisher;
@@ -132,7 +134,7 @@ public class PaxosServer {
 			avroPrepare.entityGroup = ByteBuffer.wrap(eg);
 			// TODO share/reuse/pool these objects, GC pressure
 			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-			bbos.write(MegalonMsg.MSG_PREPARE);
+			bbos.write(MsgPrepare.MSG_ID);
 			final DatumWriter<AvroPrepare> writer = 
 				new SpecificDatumWriter<AvroPrepare>(AvroPrepare.class);
 			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
@@ -178,7 +180,7 @@ public class PaxosServer {
 				}
 				byte msgType = RPCUtil.extractByte(replicaBytes);
 				logger.debug("Msg type is: " + msgType);
-				assert msgType == MegalonMsg.MSG_PREPARE_RESP;
+				assert msgType == MsgPrepareResp.MSG_ID;
 				logger.debug("Good response from replica: " + e.getKey());
 				
 				numValidResponses++;
@@ -226,7 +228,7 @@ public class PaxosServer {
 			AvroAccept avroAccept = msgAccept.toAvro();
 			// TODO share/reuse/pool these objects, GC pressure
 			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-			bbos.write(MegalonMsg.MSG_ACCEPT);
+			bbos.write(MsgAccept.MSG_ID);
 			final DatumWriter<AvroAccept> writer = 
 				new SpecificDatumWriter<AvroAccept>(AvroAccept.class);
 			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
@@ -293,7 +295,7 @@ public class PaxosServer {
 				}
 				byte msgType = RPCUtil.extractByte(replicaBytes);
 				logger.debug("Msg type is: " + msgType);
-				assert msgType == MegalonMsg.MSG_ACCEPT_RESP;
+				assert msgType == MsgAcceptResp.MSG_ID;
 				
 				logger.debug("Invoking decoder on: " + RPCUtil.strBufs(replicaBytes));
 				InputStream is = new ByteBufferInputStream(replicaBytes);

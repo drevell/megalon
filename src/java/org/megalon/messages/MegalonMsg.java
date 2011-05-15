@@ -1,8 +1,19 @@
 package org.megalon.messages;
 
-public interface MegalonMsg {
-	public static final byte MSG_PREPARE = 1;
-	public static final byte MSG_PREPARE_RESP = 2;
-	public static final byte MSG_ACCEPT = 3;
-	public static final byte MSG_ACCEPT_RESP = 4;
+import org.apache.avro.specific.SpecificRecordBase;
+
+abstract public class MegalonMsg {
+	byte msgId;
+	
+	private MegalonMsg() {}
+	
+	MegalonMsg(byte msgId) {
+		this.msgId = msgId;
+	}
+	
+	abstract public SpecificRecordBase toAvro();
+	
+	public byte getMsgId() {
+		return msgId; 
+	}
 }

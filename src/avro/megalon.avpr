@@ -67,7 +67,23 @@
             "fields": [
                 {"name": "acked", "type": "boolean"}
             ]
-        }
+        },
+        {
+            "name": "AvroValidate",
+            "type": "record",
+            "fields": [
+                {"name": "entityGroup", "type": "bytes"},
+                {"name": "walIndex", "type": "long"},
+                {"name": "isValid", "type": "boolean"}
+            ]
+        },
+        {
+            "name": "AvroValidateResp",
+            "type": "record",
+            "fields": [
+                {"name": "acked", "type": "boolean"}
+             ]
+         }
     ]
 }
 

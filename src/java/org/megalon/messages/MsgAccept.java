@@ -5,12 +5,16 @@ import java.nio.ByteBuffer;
 import org.megalon.WALEntry;
 import org.megalon.avro.AvroAccept;
 
-public class MsgAccept implements MegalonMsg {
+public class MsgAccept extends MegalonMsg {
+	public static final byte MSG_ID = 3;
+	
 	public final WALEntry walEntry;
 	public final long walIndex;
 	public final byte[] entityGroup;
 	
 	public MsgAccept(AvroAccept avroAccept) {
+		super(MSG_ID);
+
 		this.walEntry = new WALEntry(avroAccept.walEntry);
 		this.walIndex = avroAccept.walIndex;
 		
@@ -19,6 +23,7 @@ public class MsgAccept implements MegalonMsg {
 	}
 	
 	public MsgAccept(WALEntry walEntry, long walIndex, byte[] entityGroup) {
+		super(MSG_ID);
 		this.walEntry = walEntry;
 		this.walIndex = walIndex;
 		this.entityGroup = entityGroup;

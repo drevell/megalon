@@ -17,19 +17,19 @@ import org.megalon.multistageserver.MultiStageServer.NextAction.Action;
  * This stage is used by the replication server to process incoming prepare and
  * accept requests from other replicas.
  */
-public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPayload> {
+public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MPayload> {
 	Log logger = LogFactory.getLog(ReplRemoteHandlerStage.class);
-	MultiStageServer<MReplPayload> server;
+	MultiStageServer<MPayload> server;
 	WAL wal;
 	
 	public ReplRemoteHandlerStage(WAL wal) {
 		this.wal = wal;
 	}
 	
-	public NextAction<MReplPayload> runStage(MReplPayload payload) throws Exception {
+	public NextAction<MPayload> runStage(MPayload payload) throws Exception {
 		logger.debug("ReplExecStage running");
 		switch(payload.msgType) {
-		case MegalonMsg.MSG_PREPARE:
+		case MsgPrepare.MSG_ID:
 			MsgPrepare prepMsg = (MsgPrepare)payload.req;
 			WALEntry entry = null;
 			try {
@@ -41,7 +41,7 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPaylo
 			}
 			payload.resp = new MsgPrepareResp(entry, false);
 			break;
-		case MegalonMsg.MSG_ACCEPT:
+		case MsgAccept.MSG_ID:
 			MsgAccept accMsg = (MsgAccept)payload.req;
 			boolean result;
 			try {
@@ -59,7 +59,7 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPaylo
 			payload.resp = null;
 			break;
 		}
-		return new NextAction<MReplPayload>(Action.FINISHED, null);
+		return new NextAction<MPayload>(Action.FINISHED, null);
 	}
 
 	public int getNumConcurrent() {
@@ -74,7 +74,7 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MReplPaylo
 		return 50; // TODO configurable
 	}
 
-	public void setServer(MultiStageServer<MReplPayload> server) {
+	public void setServer(MultiStageServer<MPayload> server) {
 		this.server = server;
 	}
 }

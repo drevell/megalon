@@ -1,5 +1,6 @@
 package org.megalon.multistageserver;
 
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.LinkedList;
@@ -21,7 +22,7 @@ public class SocketPayload extends Payload {
 	public BBInputStream is = null;
 	
 	public List<ByteBuffer> pendingOutput = null;
-	public ByteBufferOutputStream os = new ByteBufferOutputStream();
+	private ByteBufferOutputStream os = new ByteBufferOutputStream();
 	
 	public boolean timedOut;
 	
@@ -68,5 +69,13 @@ public class SocketPayload extends Payload {
 	
 	public boolean didTimeOut() {
 		return timedOut;
+	}
+	
+	/**
+	 * To send data back to the client, Megalon stages can use the OutputStream
+	 * returned by this function.
+	 */
+	public ByteBufferOutputStream getOutputStream() {
+		return os;
 	}
 }

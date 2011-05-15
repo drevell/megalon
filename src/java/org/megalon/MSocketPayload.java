@@ -8,22 +8,19 @@ import org.megalon.multistageserver.SocketAccepter.PayloadFactory;
 import org.megalon.multistageserver.SocketPayload;
 
 public class MSocketPayload extends SocketPayload {
-	public MegalonMsg resp;
-	public int reqType;
 	public long rpcSerial; 
 	
+	// After the core server has finished processing, this will hold its response.
+	protected MegalonMsg resp; 
+
 	public MSocketPayload(SocketChannel sockChan) {
 		super(sockChan);
 	}
 	
 	public MSocketPayload(SocketChannel sockChan, Payload wrapPayload,
-			long rpcSerial) {
+			long rpcSerial, byte reqType) {
 		super(sockChan, wrapPayload);
 		this.rpcSerial = rpcSerial;
-	}
-	
-	public void setReqType(int reqType) {
-		this.reqType = reqType;
 	}
 	
 	static public class Factory implements PayloadFactory<MSocketPayload> {
@@ -32,13 +29,12 @@ public class MSocketPayload extends SocketPayload {
 		}
 	}
 	
-//	public boolean acceptIfComplete(List<ByteBuffer> msg) throws IOException {
-//		if(RPCUtil.hasCompleteMessage(msg)) {
-//			this.is = new BBInputStream(msg);
-//			return true;
-//		} else {
-//			return false;
-//		}
-//	}
+	public void setResponse(MegalonMsg resp) {
+		this.resp = resp;
+	}
 	
+//	public MSocketPayload(byte msgType, Payload outerPayload) {
+//		super(outerPayload);
+//		this.msgType = msgType;
+//	}
 }

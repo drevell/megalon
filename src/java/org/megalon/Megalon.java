@@ -17,7 +17,7 @@ import org.megalon.Config.Host;
 public class Megalon {
 	protected Config config;
 	protected ReplServer replServ = null;
-	protected Coord coord = null;
+	protected Coordinator coord = null;
 	protected ClientSharedData clientData = null;
 	protected PaxosServer paxosServer = null;
 	
@@ -30,7 +30,7 @@ public class Megalon {
 	
 	public Megalon(Config config) throws Exception {
 		ReplServer replServ = null;
-		Coord coord = null;
+		Coordinator coord = null;
 		
 		this.config = config;
 		this.uuid = UUID.randomUUID();
@@ -45,7 +45,7 @@ public class Megalon {
 			}
 		}
 		if(config.run_coord) {
-			coord = new Coord(this);
+			coord = new Coordinator(this);
 		}
 		if(config.run_client) {
 			clientData = new ClientSharedData(this);
@@ -107,7 +107,7 @@ public class Megalon {
 		return replServ;
 	}
 
-	public Coord getCoord() {
+	public Coordinator getCoord() {
 		return coord;
 	}
 

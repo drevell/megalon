@@ -49,7 +49,7 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 			throw new IOException("SelectorStage needs non-blocking sockets");
 		}
 		int interestOps;
-		List<ByteBuffer> outBufs = payload.os.getBufferList(); 
+		List<ByteBuffer> outBufs = payload.getOutputStream().getBufferList(); 
 		logger.debug("runStage has outBufs: " + RPCUtil.strBufs(outBufs));
 		if(outBufs.size() != 1 || outBufs.get(0).remaining() > 0) {
 			logger.debug("Payload has data pending write, select for write");
