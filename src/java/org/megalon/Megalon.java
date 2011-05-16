@@ -46,6 +46,7 @@ public class Megalon {
 		}
 		if(config.run_coord) {
 			coord = new Coordinator(this);
+			coord.init();
 		}
 		if(config.run_client) {
 			clientData = new ClientSharedData(this);
@@ -56,7 +57,6 @@ public class Megalon {
 		this.coord = coord;
 		
 		if(config.run_replsrv && config.replsrv_listen) {
-			logger.debug("Repl server options both true");
 			replServ.startSocketAccepter();
 		}
 		if(config.run_coord && config.coord_listen) {

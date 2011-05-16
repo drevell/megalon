@@ -64,7 +64,7 @@ public class PaxosServer {
 		serverStages.add(sendAcceptStage);
 		serverStages.add(respondStage);
 		
-		this.server = new MultiStageServer<MPaxPayload>(serverStages);
+		this.server = new MultiStageServer<MPaxPayload>("paxosSvr", serverStages);
 	}
 	
 	public Future<Boolean> commit(WALEntry walEntry, byte[] eg, 
@@ -98,7 +98,8 @@ public class PaxosServer {
 
 			Collection<ReplicaDesc> replicas = megalon.config.replicas.values();
 			int numReplicas = replicas.size(); 
-			payload.replResponses.init(server, sendAcceptStage, numReplicas-1);
+			payload.replResponses = new ReplResponses<MPaxPayload>(server, 
+					sendAcceptStage, numReplicas-1, payload, false);
 			
 			List<ByteBuffer> outBytes = encodedPrepare(payload.eg, 
 					payload.walIndex, payload.workingEntry.n);
@@ -170,7 +171,7 @@ public class PaxosServer {
 			// Look for the highest n among a quorum of responses. This is just
 			// normal Paxos. We'll use this value in accept messages below.
 			Set<Entry<String, List<ByteBuffer>>> responses = 
-				payload.replResponses.responses.entrySet();
+				payload.replResponses.getRemoteResponses().entrySet();
 			AvroPrepareResponse avroPrepResp = new AvroPrepareResponse();
 			for(Entry<String,List<ByteBuffer>> e: responses) {
 				List<ByteBuffer> replicaBytes = e.getValue();
@@ -207,12 +208,13 @@ public class PaxosServer {
 			List<ByteBuffer> outBytes = encodedAccept(payload.eg, 
 					payload.workingEntry, payload.walIndex);
 			
-			payload.replResponses.init(server, respondStage, numReplicas-1);
+			payload.replResponses = new ReplResponses<MPaxPayload>(server, 
+					respondStage, numReplicas, payload, true);
 			
 			// The local replica's response is kept separate from the others
 			// for convenience of decoding/encoding avro from remote replicas.
-			payload.replResponses.acceptAckLocal = 
-				wal.acceptLocal(payload.eg, payload.walIndex, payload.workingEntry);
+			payload.replResponses.localResponse(wal.acceptLocal(payload.eg, 
+					payload.walIndex, payload.workingEntry));
 			
 			int numFailedReplicas = sendToRemoteReplicas(replicas, outBytes, payload);
 			if(numFailedReplicas >= Util.quorumImpossible(numReplicas)) {
@@ -272,7 +274,8 @@ public class PaxosServer {
 				new SpecificDatumReader<AvroAcceptResponse>(AvroAcceptResponse.class);
 			
 			int numAcks = 0;
-			if(payload.replResponses.acceptAckLocal) {
+			Object localResponse = payload.replResponses.getLocalResponse(); 
+			if(localResponse instanceof Boolean && (Boolean)localResponse) { 
 				numAcks++;
 			}
 			
@@ -284,7 +287,7 @@ public class PaxosServer {
 			// If we get a quorum of acks, then the value we proposed was the
 			// Paxos consensus value.
 			Set<Entry<String, List<ByteBuffer>>> responses = 
-				payload.replResponses.responses.entrySet();
+				payload.replResponses.getRemoteResponses().entrySet();
 			AvroAcceptResponse avroAcceptResp = new AvroAcceptResponse();
 			BinaryDecoder dec = null;
 			for(Entry<String,List<ByteBuffer>> e: responses) {
@@ -368,7 +371,7 @@ public class PaxosServer {
 
 		public Boolean get() throws InterruptedException, ExecutionException {
 			payload.waitFinished();
-			this.committed = payload.committed;
+			this.committed = payload.isCommitted();
 			return committed;
 		}
 

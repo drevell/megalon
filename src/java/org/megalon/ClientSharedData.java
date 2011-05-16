@@ -15,11 +15,14 @@ import org.megalon.Config.ReplicaDesc;
 public class ClientSharedData {
 	Map<Host,RPCClient> replServerSockets = 
 		new HashMap<Host,RPCClient>();
+	Map<String,RPCClient> coordSockets = new HashMap<String,RPCClient>();
 	Megalon megalon;
 	
 	public ClientSharedData(Megalon megalon) {
 		this.megalon = megalon;
+		// TODO these sockets should be opened in the background
 		updateReplServerSockets();
+		updateCoordinatorSockets();
 	}
 	
 	/**
@@ -37,6 +40,27 @@ public class ClientSharedData {
 							new RPCClient(host, replDesc.name));
 				}
 			}
+		}
+	}
+	
+	/**
+	 * For each coordinator that we know about, create a connection (RPCClient).
+	 */
+	protected void updateCoordinatorSockets() {
+		for(ReplicaDesc replDesc: megalon.config.replicas.values()) {
+			if(replDesc == megalon.config.myReplica && megalon.config.run_coord) {
+				// Don't connect to local DC if we there's a coordinator in our JVM 
+				continue;
+			}
+			assert replDesc.coord.size() == 1; // for now, no clustered coordinators
+			Host host = replDesc.coord.get(0);
+			coordSockets.put(replDesc.name, new RPCClient(host, replDesc.name));
+			
+//			for(Host host: replDesc.coord) {
+//				if(!coordSockets.containsKey(host)) {
+//					coordSockets.put(host, new RPCClient(host, replDesc.name));
+//				}
+//			}
 		}
 	}
 	

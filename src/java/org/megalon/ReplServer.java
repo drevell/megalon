@@ -35,18 +35,14 @@ public class ReplServer {
 	Megalon megalon;
 	InetSocketAddress proxyTo;
 	WAL wal;
-//	MultiStageServer<MReplPayload> coreServer;
 	MultiStageServer<MPayload> coreServer;
 	final SocketAccepter<MSocketPayload> socketAccepter = 
 		new SocketAccepter<MSocketPayload>();
 	MultiStageServer<MSocketPayload> socketServer;
 	boolean ready = false;
-//	Stage<MReplPayload> execStage;
 	Stage<MPayload> execStage;
 	SelectorStage<MSocketPayload> selectorStage;
-//	AvroDecodeStage avroDecodeStage; 
 	AvroRpcDecode avroDecodeStage; 
-//	AvroEncodeStage avroEncodeStage; 
 	AvroRpcEncode avroEncodeStage; 
 	PaxosProposer paxos;
 	
@@ -60,19 +56,16 @@ public class ReplServer {
 
 		// The coreServer contains the stages that are the same regardless of 
 		// whether the request arrived by socket or by function call.
-//		Set<Stage<MReplPayload>> coreStages = new HashSet<Stage<MReplPayload>>();
 		Set<Stage<MPayload>> coreStages = new HashSet<Stage<MPayload>>();
 		execStage = new ReplRemoteHandlerStage(wal);
 		coreStages.add(execStage);
-//		coreServer = new MultiStageServer<MReplPayload>(coreStages);
-		coreServer = new MultiStageServer<MPayload>(coreStages);
+		coreServer = new MultiStageServer<MPayload>("replCore", coreStages);
 		
 		// The socketServer contains the stages that only run for socket
 		// connections. The socketServer hands off requests to coreServer to
 		// do the actual database operations.
 		Set<Stage<MSocketPayload>> socketSvrStages = 
 			new HashSet<Stage<MSocketPayload>>();
-//		avroDecodeStage = new AvroDecodeStage();
 		avroDecodeStage = new AvroRpcDecode();
 		selectorStage = new SelectorStage<MSocketPayload>(avroDecodeStage, 
 				"replSelectorStage", 1, 50);
@@ -103,7 +96,8 @@ public class ReplServer {
 		socketSvrStages.add(selectorStage);
 		socketSvrStages.add(avroEncodeStage);
 		socketSvrStages.add(avroDecodeStage);
-		socketServer = new MultiStageServer<MSocketPayload>(socketSvrStages);
+		socketServer = new MultiStageServer<MSocketPayload>("replSocketSvr", 
+				socketSvrStages);
 		
 		paxos = new PaxosProposer(megalon); 
 

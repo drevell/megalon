@@ -17,7 +17,7 @@ import org.megalon.multistageserver.MultiStageServer.Finisher;
  * completes and calls notifyAll().
  */
 public class Payload implements Finisher<Payload> {
-	private boolean isFinished = false;
+	private volatile boolean isFinished = false;
 	public Throwable throwable;
 	@SuppressWarnings("rawtypes")
 	public Finisher finisher;
@@ -108,5 +108,9 @@ public class Payload implements Finisher<Payload> {
 	 */
 	public Payload getOuterPayload() {
 		return outerPayload;
+	}
+	
+	public boolean finished() {
+		return isFinished;
 	}
 }

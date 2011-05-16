@@ -82,8 +82,22 @@
             "type": "record",
             "fields": [
                 {"name": "acked", "type": "boolean"}
-             ]
-         }
+            ]
+        },
+        {
+            "name": "AvroCheckValid",
+            "type": "record",
+            "fields": [
+                {"name": "entityGroup", "type": "bytes"}
+            ]
+        },
+        {
+            "name": "AvroCheckValidResp",
+            "type": "record",
+            "fields": [
+                {"name": "isValid", "type": "boolean"}
+            ]
+        }
     ]
 }
 

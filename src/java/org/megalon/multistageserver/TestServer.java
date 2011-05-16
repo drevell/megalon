@@ -99,7 +99,7 @@ public class TestServer {
 		stages.add(thirdStage);
 		
 		MultiStageServer<SocketPayload> server =  
-			new MultiStageServer<SocketPayload>(stages);
+			new MultiStageServer<SocketPayload>("testServer", stages);
 		
 		PlainSocketAccepter acc = new PlainSocketAccepter(server, null, 50000,
 				firstStage, true);

@@ -207,7 +207,7 @@ public class Config {
 		return new Host(host, port);
 	}
 	
-	protected class ReplicaDesc {
+	public class ReplicaDesc {
 		String name;
 		List<Host> hbase;
 		List<Host> coord;

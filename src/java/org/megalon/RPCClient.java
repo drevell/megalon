@@ -75,7 +75,7 @@ public class RPCClient {
 	 * Add a list of ByteBuffers to the pending output queue.
 	 * TODO limit the size of the output buffer
 	 */
-	public boolean write(List<ByteBuffer> outBufs, MPaxPayload payload) {
+	public boolean write(List<ByteBuffer> outBufs, AckPayload payload) {
 		if(!ready()) {
 			return false;
 		}
@@ -95,7 +95,7 @@ public class RPCClient {
 		
 		// Set up the caller to receive the response, when it arrives
 		synchronized(this) {
-			Waiter waiter = new Waiter(payload.finishTimeMs, reqSerial, payload);
+			Waiter waiter = new Waiter(payload.getFinishTimeMs(), reqSerial, payload);
 			logger.debug("Setting up waiter on " + replica + " for serial: " + 
 					reqSerial);
 			reqBySerial.put(reqSerial, waiter);
@@ -143,7 +143,7 @@ public class RPCClient {
 		logger.debug("Clearing all outstanding waiters");
 		for(Waiter waiter: reqByTimeout) {
 			reqBySerial.remove(waiter.reqSerial);
-			waiter.payload.replResponses.nack(this.replica);
+			waiter.payload.replResponses.remoteFail(this.replica);
 		}
 		reqByTimeout.clear();
 		assert reqBySerial.size() == 0 : "Inconsistent lookup structures";
@@ -250,7 +250,7 @@ public class RPCClient {
 					break;
 				}
 				logger.debug("Replica " + replica + " timing out a waiter");
-				waiter.payload.replResponses.nack(replica);
+				waiter.payload.replResponses.remoteFail(replica);
 				
 				// Remove the timed out waiter from our tracking structures
 				it.remove();
@@ -317,7 +317,7 @@ public class RPCClient {
 					logger.debug("Response for valid waiter");
 					boolean didRemove = reqByTimeout.remove(waiter);
 					assert didRemove;
-					waiter.payload.replResponses.ack(replica, response);
+					waiter.payload.replResponses.remoteResponse(replica, response);
 				}
 			}
 		}
@@ -336,9 +336,9 @@ public class RPCClient {
 	 */
 	static class Waiter {
 		long finishTimeMs, reqSerial;
-		MPaxPayload payload;
+		AckPayload payload;
 		
-		public Waiter(long finishTimeMs, long reqSerial, MPaxPayload payload) {
+		public Waiter(long finishTimeMs, long reqSerial, AckPayload payload) {
 			this.finishTimeMs = finishTimeMs;
 			this.reqSerial = reqSerial;
 			this.payload = payload;

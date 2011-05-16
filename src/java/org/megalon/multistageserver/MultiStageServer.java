@@ -39,6 +39,7 @@ public class MultiStageServer<T extends Payload> {
 	protected ThreadPoolExecutor finisherExec;
 	protected ThreadFactory daemonThreadFactory;
 	boolean inited = false;
+	String name;
 
 	// TODO consider scrapping NextAction and make stages explicitly enqueue
 	static public class NextAction<T extends Payload> {
@@ -61,8 +62,8 @@ public class MultiStageServer<T extends Payload> {
 	/**
 	 * Constructor that just wraps a call to init().
 	 */
-	public MultiStageServer(Set<Stage<T>> stages) throws Exception {
-		init(stages);
+	public MultiStageServer(String name, Set<Stage<T>> stages) throws Exception {
+		init(name, stages);
 	}
 
 	/**
@@ -92,8 +93,9 @@ public class MultiStageServer<T extends Payload> {
 	 *            internally with a small number of threads to run the payload
 	 *            finishers.
 	 */
-	public void init(Set<Stage<T>> stages, ThreadPoolExecutor finisherExec)
+	public void init(String name, Set<Stage<T>> stages, ThreadPoolExecutor finisherExec)
 			throws Exception {
+		this.name = name;
 		// Make a ThreadFactory that produces daemon threads
 		daemonThreadFactory = new ThreadFactory() {
 			public Thread newThread(Runnable r) {
@@ -124,8 +126,8 @@ public class MultiStageServer<T extends Payload> {
 	 * you don't know what a finisher executor pool is, this is the right init()
 	 * function for you.
 	 */
-	public void init(Set<Stage<T>> stages) throws Exception {
-		init(stages, null);
+	public void init(String name, Set<Stage<T>> stages) throws Exception {
+		init(name, stages, null);
 	}
 
 	public interface Finisher<T extends Payload> {
@@ -150,7 +152,7 @@ public class MultiStageServer<T extends Payload> {
 		StageRunner sr = new StageRunner(startStage, payload);
 		ThreadPoolExecutor exec = execs.get(startStage);
 		if (exec == null) {
-			logger.warn("Enqueue into stage with null executor?!?",
+			logger.warn("Enqueue into stage with null executor, server " + name,
 					new Exception()); // Exception will print stack trace
 			return false;
 		} else {

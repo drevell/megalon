@@ -29,7 +29,7 @@ MultiStageServer.Finisher<EchoServer.EchoPayload>
 		echoStage = new EchoStage();
 		Set<Stage<EchoPayload>> stages = new HashSet<Stage<EchoPayload>>();
 		stages.add(echoStage);
-		super.init(stages);	
+		super.init("echoServer", stages);	
 	}
 	
 	/**
