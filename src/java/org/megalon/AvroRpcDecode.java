@@ -152,6 +152,12 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 			}
 			MPayload newPayload = new MPayload(msgType, req, payload);
 			coreServer.enqueue(newPayload, coreStage, this);
+			
+			// Discard ByteBuffers that we have read completely
+			while (!payload.readBufs.isEmpty()
+					&& payload.readBufs.getFirst().remaining() == 0) {
+				payload.readBufs.removeFirst();
+			}
 		}
 	}
 		

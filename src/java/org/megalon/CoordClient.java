@@ -39,6 +39,20 @@ import org.megalon.multistageserver.MultiStageServer.NextAction;
 import org.megalon.multistageserver.MultiStageServer.NextAction.Action;
 import org.megalon.multistageserver.MultiStageServer.Stage;
 
+/**
+ * This is a MultiStageServer that acts as a non-blocking client for coordinator
+ * requests. Clients can run a "CheckValid" operation or a "Validate" operation in either
+ * blocking or non-blocking modes.
+ * 
+ * "CheckValid" asks the coordinator whether it thinks the local replica is up 
+ * to date. Readers will execute a CheckValid when they're deciding which 
+ * replica to read from. 
+ *  
+ * "Validate" informs the coordinator whether the local replica is, in 
+ * fact, up to date. This will be run by writers when they are committing.
+ * 
+ * See the MegaStore paper for a high-level description of these operations.
+ */
 public class CoordClient {
 	Log logger = LogFactory.getLog(CoordClient.class);
 	Megalon megalon;
@@ -64,6 +78,11 @@ public class CoordClient {
 		coordCliServer = new MultiStageServer<CoordCliPayload>("coordCli", stages);
 	}
 
+	/**
+	 * Begin a non-blocking CheckValid operation, returning a Future that will
+	 * eventually give the result. The Future returns boolean whether the given 
+	 * replica is up to date.
+	 */
 	public Future<Boolean> checkValidAsync(String replica, byte[] entityGroup, 
 	long timeoutMs) throws IOException {
 		if(replica.equals(megalon.config.myReplica.name) && megalon.config.run_coord) {
@@ -79,6 +98,10 @@ public class CoordClient {
 		return new IsValidFuture(payload);
 	}
 	
+	/**
+	 * Do a blocking CheckValid operation. Returns boolean whether the given
+	 * replica is up to date.
+	 */
 	public boolean checkValidSync(String replica, byte[] entityGroup, 
 	long timeoutMs) throws IOException {
 		try {
@@ -92,18 +115,27 @@ public class CoordClient {
 		}
 	}
 	
+	/**
+	 * Begin a non-blocking Validate operation for each of the given replicas.
+	 * @param validate True to validate, false to invalidate
+	 */
 	public Future<Map<String,Boolean>> validateAsync(List<ReplicaDesc> replicas, 
-			byte[] entityGroup, long walIndex, long timeoutMs) {
+			byte[] entityGroup, long walIndex, long timeoutMs, boolean validate) {
 		CoordCliPayload payload = new CoordCliPayload(entityGroup, replicas, 
-				timeoutMs, walIndex);
+				timeoutMs, walIndex, validate);
 		coordCliServer.enqueue(payload, validateEncStage);
 		return new ValidateFuture(payload);
 	}
 	
+	/**
+	 * Do a blocking Validate operation on each of the given replicas.
+	 * @param validate True to validate, false to invalidate.
+	 */
 	public Map<String,Boolean> validateSync(List<ReplicaDesc> replicas, 
-	byte[] entityGroup, long walIndex, long timeoutMs) throws IOException {
+	byte[] entityGroup, long walIndex, long timeoutMs, boolean validate) 
+	throws IOException {
 		Future<Map<String,Boolean>> future = validateAsync(replicas, 
-				entityGroup, walIndex, timeoutMs);
+				entityGroup, walIndex, timeoutMs, validate);
 		
 		Exception storedException;
 		try {
@@ -117,6 +149,10 @@ public class CoordClient {
 		throw new IOException(storedException);
 	}
 	
+	/**
+	 * This server stage encodes an outgoing CheckValid request as Avro and
+	 * sends it via the appropriate RPCClient to reach the desired replica.
+	 */
 	class ChkvEncStage implements Stage<CoordCliPayload> {
 		/**
 		 * This finisher callback will be called when a local coordinator 
@@ -207,6 +243,12 @@ public class CoordClient {
 		public void setServer(MultiStageServer<CoordCliPayload> server) {}		
 	}
 
+	/**
+	 * When the remote server responds to a CheckValid request, this stage 
+	 * decodes its Avro message into single boolean response, which is stored in
+	 * the payload object. At this point the server is finished with the
+	 * CheckValid operation.
+	 */
 	class ChkvrespDecStage implements Stage<CoordCliPayload> {
 		public NextAction<CoordCliPayload> runStage(CoordCliPayload payload)
 				throws Exception {
@@ -252,7 +294,8 @@ public class CoordClient {
 	}
 	
 	/**
-	 * Sends a Validate message to a list of replicas.
+	 * This stage sends a Validate message to a list of replicas. It encodes an
+	 * Avro message and sends to each replica.
 	 */
 	public class ValidateEncStage implements Stage<CoordCliPayload> {
 		class LocalFinisher implements Finisher<MPayload> {
@@ -280,7 +323,7 @@ public class CoordClient {
 			AvroValidate avro = new AvroValidate();
 			avro.entityGroup = ByteBuffer.wrap(payload.entityGroup);
 			avro.walIndex = payload.walIndex;
-			avro.isValid = payload.egValid;
+			avro.isValid = payload.validate;
 			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
 			// TODO reuse
 			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
@@ -347,7 +390,13 @@ public class CoordClient {
 		public void setServer(MultiStageServer<CoordCliPayload> server) {}
 		
 	}
-	
+	/**
+	 * This stage handles the responses to a Validate message. When all 
+	 * responses have been received (or the timeout expired), this stage will
+	 * run. It decodes the Avro responses, invalidates the replicas that timed
+	 * out, and sets up a mapping String->Boolean indicating which replicas
+	 * completed the operation.
+	 */
 	public class ValidateRespDecStage implements Stage<CoordCliPayload> {
 		public NextAction<CoordCliPayload> runStage(CoordCliPayload payload) 
 		throws IOException {
@@ -406,6 +455,9 @@ public class CoordClient {
 		public void setServer(MultiStageServer<CoordCliPayload> server) {}
 	}
 	
+	/**
+	 * The eventual result of a non-blocking CheckValid operation.
+	 */
 	static public class IsValidFuture implements Future<Boolean> {
 		CoordCliPayload payload;
 		
@@ -439,6 +491,9 @@ public class CoordClient {
 		}
 	}
 	
+	/**
+	 * The eventual result of a non-blocking Validate operation.
+	 */
 	static public class ValidateFuture implements Future<Map<String,Boolean>> {
 		CoordCliPayload payload;
 		
@@ -472,53 +527,4 @@ public class CoordClient {
 			return payload.finished();
 		}
 	}
-	
-//	/**
-//	 * Just wraps a value inside a Future, even though it's already ready. This
-//	 * is useful as a return value from a function that is *possibly*
-//	 * asynchronous, but might return a value immediately. The immediate return
-//	 * value can be wrapped in this Future.
-//	 */
-//	static public class ValueWrapFuture implements Future<Boolean> {
-//		boolean value;
-//		Exception e;
-//		
-//		public ValueWrapFuture(boolean value) {
-//			this.value = value;
-//		}
-//		
-//		public ValidWrapFuture(Exception e) {
-//			this.exc = e;
-//		}
-//		
-//		public boolean cancel(boolean mayInterruptIfRunning) {
-//			return false;
-//		}
-//
-//		private void throwStoredException() {
-//			if(e instanceof InterruptedException) {
-//				throw (InterruptedException)e;
-//			} else {
-//				throw 
-//			}
-//		}
-//		
-//		public Boolean get() throws InterruptedException, ExecutionException {
-//			return value;
-//		}
-//
-//		public Boolean get(long timeout, TimeUnit unit)
-//				throws InterruptedException, ExecutionException,
-//				TimeoutException {
-//			return value;
-//		}
-//
-//		public boolean isCancelled() {
-//			return false;
-//		}
-//
-//		public boolean isDone() {
-//			return true;
-//		}
-//	}
 }

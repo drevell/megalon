@@ -8,6 +8,7 @@ import java.nio.channels.SocketChannel;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.megalon.multistageserver.MultiStageServer.Finisher;
 import org.megalon.multistageserver.MultiStageServer.Stage;
 
 /**
@@ -30,6 +31,18 @@ public class SocketAccepter<T extends SocketPayload> {
 	PayloadFactory<T> payloadFactory;
 	boolean inited = false;
 	boolean blocking;
+	
+	Finisher<T> socketCloseFinisher = new Finisher<T>() {
+		public void finish(T payload) {
+			logger.debug("SocketAccepter finisher closing socket");
+			T sockPayload = (T)payload;
+			try {
+				sockPayload.sockChan.close();
+			} catch (IOException e) {
+				logger.debug("IOException closing socket", e);
+			}
+		}
+	};
 	
 	public SocketAccepter(MultiStageServer<T> server, InetAddress addr,
 			int port, Stage<T> startStage, PayloadFactory<T> payloadFactory, 
@@ -87,7 +100,7 @@ public class SocketAccepter<T extends SocketPayload> {
 				
 				T payload = payloadFactory.makePayload(acceptedChan);
 				
-				if(!server.enqueue(payload, startStage)) {
+				if(!server.enqueue(payload, startStage, socketCloseFinisher)) {
 					logger.warn("The start stage (id " + startStage
 							+ ") wasn't defined");
 				}

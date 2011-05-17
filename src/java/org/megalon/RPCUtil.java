@@ -75,12 +75,20 @@ public class RPCUtil {
 		}
 		StringBuilder sb = new StringBuilder();
 		for(ByteBuffer bb: bufs) {
-			ByteBuffer logBb = bb.duplicate();
-			byte[] bytes = new byte[logBb.remaining()];
-			logBb.get(bytes);
-			sb.append(Arrays.toString(bytes));
+			sb.append(strBuf(bb));
+//			ByteBuffer logBb = bb.duplicate();
+//			byte[] bytes = new byte[logBb.remaining()];
+//			logBb.get(bytes);
+//			sb.append(Arrays.toString(bytes));
 		}
 		return sb.toString();
+	}
+	
+	static public String strBuf(ByteBuffer bb) {
+		ByteBuffer dupedBb = bb.duplicate();
+		byte[] bytes = new byte[dupedBb.remaining()];
+		dupedBb.get(bytes);
+		return Arrays.toString(bytes);
 	}
 	
 	/**

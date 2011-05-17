@@ -1,12 +1,14 @@
 package org.megalon.multistageserver;
 
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.multistageserver.SocketAccepter.PayloadFactory;
@@ -21,8 +23,10 @@ public class SocketPayload extends Payload {
 	public LinkedList<ByteBuffer> readBufs = new LinkedList<ByteBuffer>();
 	public BBInputStream is = null;
 	
-	public List<ByteBuffer> pendingOutput = null;
-	private ByteBufferOutputStream os = new ByteBufferOutputStream();
+//	public List<ByteBuffer> pendingOutput = null;
+//	private ByteBufferOutputStream os = new ByteBufferOutputStream();
+	private Deque<ByteBuffer> outputQueue = new LinkedBlockingDeque<ByteBuffer>();
+	private Lock outputAppendLock = new ReentrantLock();
 	
 	public boolean timedOut;
 	
@@ -39,17 +43,6 @@ public class SocketPayload extends Payload {
 		public SocketPayload makePayload(SocketChannel sockChan) {
 			return new SocketPayload(sockChan);
 		}
-	}
-	
-	public void resetForRead() {
-		if(!continueReading) {
-			logger.debug("resetForRead: clearing readBufs");
-			readBufs.clear();
-		} else {
-			logger.debug("resetForRead: not clearing readBufs");
-		}
-		pendingOutput = null;
-		os.reset();
 	}
 	
 	/**
@@ -72,10 +65,44 @@ public class SocketPayload extends Payload {
 	}
 	
 	/**
-	 * To send data back to the client, Megalon stages can use the OutputStream
-	 * returned by this function.
+	 * Queue up some output buffers to be eventually written to the socket.
 	 */
-	public ByteBufferOutputStream getOutputStream() {
-		return os;
+	public void enqueueOutput(List<ByteBuffer> outBufs) {
+		try {
+			outputAppendLock.lock();
+			outputQueue.addAll(outBufs);
+		} finally {
+			outputAppendLock.unlock();
+		}
 	}
+	
+	/**
+	 * Returns the ByteBuffer at the head of the output queue without dequeueing
+	 * it, or null if the queue is empty.
+	 */
+	public ByteBuffer peekPendingOutput() {
+		return outputQueue.peek();
+	}
+	
+	/**
+	 * Dequeues and returns the next ByteBuffer that's pending output, or null
+	 * if there are no ByteBuffers pending output.
+	 */
+	public ByteBuffer pollPendingOutput() {
+		return outputQueue.poll();
+	}
+	
+	/**
+	 * Pushes a ByteBuffer onto the head (NOT TAIL) of the pending output queue.
+	 */
+	public void pushPendingOutput(ByteBuffer bb) {
+		outputQueue.push(bb);
+	}
+//	/**
+//	 * To send data back to the client, Megalon stages can use the OutputStream
+//	 * returned by this function.
+//	 */
+//	public ByteBufferOutputStream getOutputStream() {
+//		return os;
+//	}
 }

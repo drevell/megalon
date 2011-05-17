@@ -224,10 +224,11 @@ public class RPCClient {
 	synchronized void handleWritable() throws IOException {
 		int bytesWritten;
 		do {
-			if(outBufs.size() == 0) {
+			if(outBufs.isEmpty()) {
 				break;
 			}
-			ByteBuffer bb = outBufs.get(0); 
+			ByteBuffer bb = outBufs.getFirst();
+			logger.debug("schan.write() for bb: " + RPCUtil.strBuf(bb));
 			bytesWritten = schan.write(bb);
 			if(bb.remaining() == 0) {
 				outBufs.removeFirst(); // TODO GC pressure

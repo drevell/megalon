@@ -2,7 +2,7 @@ package org.megalon;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.List;
+import java.util.LinkedList;
 import java.util.Map;
 
 import org.apache.avro.io.DatumWriter;
@@ -51,7 +51,7 @@ public class AvroRpcEncode implements Stage<MSocketPayload> {
 			// TODO should reuse writers and encoders
 			DatumWriter avroWriter = new SpecificDatumWriter(avroClass);
 			SpecificRecordBase avroObj = payload.resp.toAvro();
-			ByteBufferOutputStream os = payload.getOutputStream();
+			ByteBufferOutputStream os = new ByteBufferOutputStream();
 			os.write(payload.resp.getMsgId());
 			Encoder enc = EncoderFactory.get().binaryEncoder(os, null);
 			avroWriter.write(avroObj, enc);
@@ -60,19 +60,25 @@ public class AvroRpcEncode implements Stage<MSocketPayload> {
 			
 			// Output format: nBytes, rpcSerial, body
 			int numOutBytes = Long.SIZE/8;
-			List<ByteBuffer> bbList = os.getBufferList();
+			LinkedList<ByteBuffer> bbList = (LinkedList)os.getBufferList();
+//			bbList.addFirst(ByteBuffer.wrap(new byte[] {payload.resp.getMsgId()}));
 			logger.debug("Encoded response: " + 
 					RPCUtil.strBufs(bbList));
 			for(ByteBuffer bb: bbList ) {
 				numOutBytes += bb.remaining();
 			}
 			
-			logger.debug("Writing buffer length: " + numOutBytes);
-			os.write(Util.intToBytes(numOutBytes));
 			logger.debug("Writing serial: " + payload.rpcSerial);
-			os.write(Util.longToBytes(payload.rpcSerial));
-			os.append(bbList); // efficient no-copy append
-			os.flush();
+			bbList.addFirst(ByteBuffer.wrap(Util.longToBytes(payload.rpcSerial)));
+			logger.debug("Writing buffer length: " + numOutBytes);
+			bbList.addFirst(ByteBuffer.wrap(Util.intToBytes(numOutBytes)));
+//			os.write(Util.intToBytes(numOutBytes));
+//			os.write(Util.longToBytes(payload.rpcSerial));
+//			os.append(bbList); // efficient no-copy append
+//			os.flush();
+			logger.debug("AvroRpcEncode eneueuing output: " + 
+					RPCUtil.strBufs(bbList));
+			payload.enqueueOutput(bbList);
 			return new NextAction<MSocketPayload>(Action.FORWARD, selectorStage);
 		} catch (IOException e) {
 			logger.warn("IOException encoding to avro", e);

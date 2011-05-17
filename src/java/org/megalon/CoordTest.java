@@ -30,6 +30,7 @@ public class CoordTest {
 		
 		byte[] eg = "my_eg".getBytes();
 		
+		// Assume the coordinator started fresh, all egs should be invalid
 		CoordClient c = new CoordClient(megalon);
 		assert c.checkValidSync("west", eg, 1000) == false;
 		logger.debug("west checkvalid succeeded");
@@ -39,13 +40,25 @@ public class CoordTest {
 		List<ReplicaDesc> replicas = new LinkedList<ReplicaDesc>();
 		replicas.addAll(megalon.getConfig().replicas.values());
 		
-		Map<String,Boolean> validatedEgs = c.validateSync(replicas, eg, 1, 1000);
+		Map<String,Boolean> validatedEgs = c.validateSync(replicas, eg, 1, 1000, true);
+		validatedEgs = c.validateSync(replicas, eg, 1, 1000, true);
+		validatedEgs = c.validateSync(replicas, eg, 1, 1000, true);
 		
-		for(Entry<String,Boolean> e: validatedEgs.entrySet()) {
-			assert e.getValue(): e.getKey() + " failed validation";
-		}
-		assert replicas.size() == validatedEgs.size();
+		assertAllValidated(validatedEgs,replicas.size());
+		
+		// Invalidate and make sure it is reflected in later checkValidate ops
+		c.validateAsync(replicas, eg, 2, 1000, false).get();
+		
+		assert c.checkValidAsync("west", eg, 1000).get() == false;
+		assert c.checkValidAsync("east", eg, 1000).get() == false;
 		
 		// TODO test async versions also
+	}
+	
+	static void assertAllValidated(Map<String, Boolean> m, int numExpected) {
+		for(Entry<String,Boolean> e: m.entrySet()) {
+			assert e.getValue(): e.getKey() + " failed validation";
+		}
+		assert m.size() == numExpected;
 	}
 }

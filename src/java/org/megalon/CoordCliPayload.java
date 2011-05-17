@@ -16,6 +16,7 @@ public class CoordCliPayload extends AckPayload {
 	long walIndex = -1;
 	public Map<String,Boolean> validated; // the answer
 	List<ReplicaDesc> replicas;
+	boolean validate; // true if we're validating, false if we're invalidating
 		
 	/**
 	 * This constructor is used when we're doing a CheckValid operation.
@@ -28,14 +29,16 @@ public class CoordCliPayload extends AckPayload {
 
 	/**
 	 * This constructor is used when we're doing a Validate operation.
+	 * @param validate True to validate, false to invalidate
 	 */
 	public CoordCliPayload(byte[] entityGroup, List<ReplicaDesc> replicas, 
-			long timeoutMs, long walIndex) {
+			long timeoutMs, long walIndex, boolean validate) {
 		super(timeoutMs);
 		this.entityGroup = entityGroup;
 		this.replicas = replicas;
 		this.walIndex = walIndex;
 		this.validated = new HashMap<String,Boolean>();
+		this.validate = validate;
 	}
 	
 	public boolean isEgValid() {

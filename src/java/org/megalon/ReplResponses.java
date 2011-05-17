@@ -94,10 +94,10 @@ public class ReplResponses<T extends AckPayload> {
 		if(numResponses == expectedResponses) {
 			server.enqueue(payload, nextStage, 
 					payload.finisher);
-			logger.debug("****** enqueueIfAllResponses: all responded, enqueueing");
+			logger.debug("enqueueIfAllResponses: all responded, enqueueing");
 			allResponses = true;
 		} else {
-			logger.debug("****** enqueueIfAllResponses: not enough yet");
+			logger.debug("enqueueIfAllResponses: not enough yet");
 		}
 	}
 	
