@@ -13,7 +13,7 @@ public class MPaxPayload extends AckPayload {
 	WALEntry requestedEntry; // The original value proposed by the client
 	// We may end up preparing/accepting a value other than the one proposed by 
 	// the client, if another client is also vying for this log position
-	boolean usedOtherEntry = false; 
+	boolean proposedOwnValue = false; 
 	WALEntry workingEntry; 
 	long walIndex;
 	

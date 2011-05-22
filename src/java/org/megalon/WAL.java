@@ -14,13 +14,12 @@ import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
+import org.megalon.WALEntry.Status;
 import org.megalon.avro.AvroWALEntry;
 
 /**
@@ -34,50 +33,63 @@ public class WAL {
 	public static final byte[] N_BYTES = "n".getBytes();
 	public static final int MAX_ACCEPT_TRIES = 5;
 	public static final int MAX_PREPARE_TRIES = 5;
-
+	public static final int MAX_CHOSEN_TRIES = 5;
+	
 	// TODO don't hardcode
-	byte[] cf = "CommitLogCF".getBytes();
-
+	static final byte[] cf = "CommitLogCF".getBytes();
+	static final byte[] WAL_TABLE = "CommitLog".getBytes();
+	
 	Log logger = LogFactory.getLog(WAL.class);
 	final DatumReader<AvroWALEntry> reader = new SpecificDatumReader<AvroWALEntry>(
 			AvroWALEntry.class);
 	final DatumWriter<AvroWALEntry> writer = new SpecificDatumWriter<AvroWALEntry>(
 			AvroWALEntry.class);
-	Configuration hconf;
-	HTable htable;
 	Megalon megalon;
 
 	public WAL(Megalon megalon) {
 		this.megalon = megalon;
-		connect();
 	}
 
-	public void connect() {
-		hconf = HBaseConfiguration.create(); // TODO HBase address
-		// hconf.set("hbase.zookeeper.quorum", commaSepZkServers);
+	/**
+	 * Gets an HTable instance from the megalon shared pool.
+	 */
+	HTableInterface getWalHTable() {
+		return megalon.getHTablePool().getTable(WAL_TABLE);
+	}
+	
+	void putHTablePool(HTableInterface hTable) {
+		megalon.getHTablePool().putTable(hTable);
+	}
+	
+	/**
+	 * @see {@link #read(byte[], long)}
+	 */
+	WALEntry read(byte[] entityGroup, long walIndex) throws IOException {
+		HTableInterface hTable = null;
 		try {
-			htable = new HTable(hconf, "CommitLog");
-		} catch (IOException e) {
-			logger.warn("HTable connection failure", e);
+			hTable = getWalHTable();
+			return read(hTable, entityGroup, walIndex);
+		} finally {
+			if(hTable != null) {
+				putHTablePool(hTable);
+			}
 		}
 	}
-
-	void requireHtableConnected() throws IOException {
-		if (htable == null) {
-			throw new IOException("HTable disconnected");
-		}
-	}
-
-	synchronized public WALEntry read(byte[] entityGroup, long walIndex) 
+	
+	/**
+	 * Read an entry from the given entityGroup's write ahead log, at the given
+	 * position.
+	 */
+	synchronized WALEntry read(HTableInterface hTable, byte[] entityGroup, long walIndex) 
 	throws IOException {
-		requireHtableConnected();
 		byte[] row = ArrayUtils.addAll(entityGroup, Util.longToBytes(walIndex));
 		Get get = new Get(row);
 		get.addColumn(cf, ENTRY_BYTES);
-
-		Result result = htable.get(get);
+	
+		hTable = getWalHTable();
+		Result result = hTable.get(get);
 		KeyValue columnKv = result.getColumnLatest(cf, ENTRY_BYTES);
-
+	
 		if (columnKv != null) {
 			byte[] valBytes = columnKv.getValue();
 			Decoder decoder = DecoderFactory.get()
@@ -90,6 +102,22 @@ public class WAL {
 	}
 
 	/**
+	 * @see {@link #prepareLocal(HTableInterface, byte[], long, long)}
+	 */
+	WALEntry prepareLocal(byte[] entityGroup, long walIndex, long n) 
+	throws IOException {
+		HTableInterface hTable = null;
+		try {
+			hTable = getWalHTable();
+			return prepareLocal(hTable, entityGroup, walIndex, n);
+		} finally {
+			if(hTable != null) {
+				putHTablePool(hTable);
+			}
+		}
+	}
+	
+	/**
 	 * Looks at the WAL in HBase to get the most recent data for a certain WAL
 	 * entry, identified by the proposal number. If there was a previously
 	 * accepted value for this log entry, it would be returned, and nothing will
@@ -101,9 +129,8 @@ public class WAL {
 	 *         existing log message, which also means Paxos NACK.
 	 * @throws IOException
 	 */
-	synchronized public WALEntry prepareLocal(byte[] entityGroup, long walIndex,
-	long n) throws IOException {
-		requireHtableConnected();
+	synchronized public WALEntry prepareLocal(HTableInterface hTable, 
+			byte[] entityGroup, long walIndex, long n) throws IOException {
 		int tries = 0;
 		while (true) {
 			try {
@@ -116,11 +143,11 @@ public class WAL {
 				}
 
 				// We haven't seen anything yet for this WAL entry
-				WALEntry newEntry = new WALEntry(n, null,
+				WALEntry newEntry = new WALEntry(n, null, null,
 						WALEntry.Status.PREPARED);
 
 				// CAS: require that no one wrote since we read.
-				putWAL(entityGroup, walIndex, newEntry, true, null);
+				putWAL(hTable, entityGroup, walIndex, newEntry, true, null);
 				return null;
 			} catch (CasChanged e) {
 				tries++;
@@ -143,6 +170,23 @@ public class WAL {
 	}
 
 	/**
+	 * @see {@link #putWAL(HTableInterface, byte[], long, WALEntry, boolean, 
+	 * WALEntry)}
+	 */
+	void putWAL(byte[] entityGroup, long walIndex, WALEntry entry, 
+			boolean doCasCheck, WALEntry casCheckEntry) throws IOException {
+		HTableInterface hTable = null;
+		try {
+			hTable = getWalHTable();
+			putWAL(hTable, entityGroup, walIndex, entry, doCasCheck, casCheckEntry);
+		} finally {
+			if(hTable != null) {
+				putHTablePool(hTable);
+			}
+		}
+	}
+	
+	/**
 	 * Write an entry to the WAL in HBase. If doCasCheck is true, this does a
 	 * compare-and-swap so that the database will only change if the existing
 	 * entry's entry.n is equal to casCheckEntry.n .
@@ -152,10 +196,9 @@ public class WAL {
 	 *            equal to casCheckEntry.n . Pass "null" to require that the
 	 *            database value not exist.
 	 */
-	synchronized protected void putWAL(byte[] entityGroup, long walIndex, 
-	WALEntry entry, boolean doCasCheck, WALEntry casCheckEntry) throws IOException {
-		requireHtableConnected();
-
+	synchronized protected void putWAL(HTableInterface hTable, byte[] entityGroup, 
+	long walIndex, WALEntry entry, boolean doCasCheck, WALEntry casCheckEntry) 
+	throws IOException {
 		ByteArrayOutputStream bao = new ByteArrayOutputStream();
 		BinaryEncoder e = EncoderFactory.get().binaryEncoder(bao, null);
 		
@@ -176,11 +219,11 @@ public class WAL {
 			} else {
 				casNBytes = Util.longToBytes(casCheckEntry.n);
 			}
-			if (!htable.checkAndPut(row, cf, N_BYTES, casNBytes, put)) {
+			if (!hTable.checkAndPut(row, cf, N_BYTES, casNBytes, put)) {
 				throw new CasChanged();
 			}
 		} else {
-			htable.put(put);
+			hTable.put(put);
 		}
 	}
 
@@ -190,10 +233,8 @@ public class WAL {
 	 * @return true if the entry had the highest n seen yet and was written to
 	 *         the WAL. false otherwise.
 	 */
-	synchronized protected boolean acceptLocal(byte[] entityGroup, long walIndex,
+	synchronized boolean acceptLocal(byte[] entityGroup, long walIndex, 
 	WALEntry entry) throws IOException {
-		requireHtableConnected();
-
 		int tries = 0;
 		while (true) {
 			try {
@@ -211,6 +252,26 @@ public class WAL {
 					throw new TooConcurrent();
 				}
 				logger.debug("acceptLocal CAS failed, retrying");
+			}
+		}
+	}
+	
+	synchronized protected WALEntry changeWalStatus(byte[] entityGroup, 
+			long walIndex, Status status) throws IOException {
+		int tries = 0;
+		while(true) {
+			try {
+				WALEntry walEntry = read(entityGroup, walIndex);
+				walEntry.status = status;
+				putWAL(entityGroup, walIndex, walEntry);
+				return walEntry;
+			} catch (CasChanged e) {
+				tries++;
+				if(tries >= MAX_CHOSEN_TRIES) {
+					String errMsg = "chosenLocal too many CAS retries"; 
+					logger.debug(errMsg);
+					throw new TooConcurrent(errMsg);
+				}
 			}
 		}
 	}

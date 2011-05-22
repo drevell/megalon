@@ -15,9 +15,11 @@ public class MsgPrepare extends MegalonMsg {
 		super(MSG_ID);
 		this.n = avroPrepare.n;
 		this.walIndex = avroPrepare.walIndex;
-		
-		this.entityGroup = new byte[avroPrepare.entityGroup.remaining()];
-		avroPrepare.entityGroup.get(this.entityGroup);
+	
+		assert avroPrepare.entityGroup.remaining() == avroPrepare.entityGroup.capacity();
+		this.entityGroup = avroPrepare.entityGroup.array();
+//		this.entityGroup = new byte[avroPrepare.entityGroup.remaining()];
+//		avroPrepare.entityGroup.get(this.entityGroup);
 	}
 	
 	public AvroPrepare toAvro() {

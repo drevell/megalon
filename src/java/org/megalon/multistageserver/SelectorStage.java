@@ -53,11 +53,11 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 		if(payload.sockChan.isBlocking()) {
 			throw new IOException("SelectorStage needs non-blocking sockets");
 		}
-		logger.debug("Adding payload to pending select queue");
+		//logger.debug("Adding payload to pending select queue");
 		payloadsPendingSelect.add(payload);
-		logger.debug("Sending wakeup");
+		// logger.debug("Sending wakeup");
 		selector.wakeup();
-		logger.debug("Sent wakeup");
+		//logger.debug("Sent wakeup");
 		return new NextAction<T>(Action.IGNORE, null);
 	}
 
@@ -86,9 +86,9 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 			long lastIOErrMsgTime = 0;
 			while(true) {
 				try {
-					logger.debug("Calling select()");
+					//logger.debug("Calling select()");
 					selector.select();
-					logger.debug("select() returned");
+					//logger.debug("select() returned");
 				} catch (IOException e) {
 					// Only log every 10 seconds, don't spam the log
 					if(System.currentTimeMillis() - lastIOErrMsgTime > 10000) {
@@ -108,11 +108,11 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 				// should be added to the selector.
 				for(T payload: payloadsPendingSelect) {
 					int interestOps = SelectionKey.OP_READ;
-					logger.debug("Adding socket to the selector: " + 
-							payload.sockChan.socket().getInetAddress() + ":" +
-							payload.sockChan.socket().getPort());
+					// logger.debug("Adding socket to the selector: " + 
+					//		payload.sockChan.socket().getInetAddress() + ":" +
+					//		payload.sockChan.socket().getPort());
 					if(payload.peekPendingOutput() != null) {
-						logger.debug("Selecting for writability");
+						//logger.debug("Selecting for writability");
 						interestOps |= SelectionKey.OP_WRITE;
 					}
 
@@ -122,7 +122,7 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 						logger.debug("IOException on selector registration", ex);
 						server.finishPayload(payload, ex);
 					}
-					logger.debug("Done adding socket to the selector");
+					//logger.debug("Done adding socket to the selector");
 					payloadsPendingSelect.remove(payload);
 				}
 			}
@@ -144,22 +144,19 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 		boolean isEndOfStream = false;
 		try {
 			if(key.isWritable()) {
-				logger.debug("SelectorStage: socket is writable");
-//				List<ByteBuffer> outBufs = payload.pendingOutput;
-//				ListIterator<ByteBuffer> bufIt = outBufs.listIterator();
-//				while(bufIt.hasNext()) {
+				//logger.debug("SelectorStage: socket is writable");
+
 				while(true) {
 					ByteBuffer bb = payload.pollPendingOutput();
 					if(bb == null) {
 						break;
 					}
-//					ByteBuffer bb = bufIt.next();
 					int numRemaining = bb.remaining();
 					if(numRemaining == 0) {
 						continue;
 					}
-					logger.debug("To SocketChannel.write() with " + 
-							RPCUtil.strBuf(bb));
+					//logger.debug("To SocketChannel.write() with " + 
+					//		RPCUtil.strBuf(bb));
 					int numWritten = schan.write(bb);
 					if(numWritten != numRemaining) {
 						// We didn't write all the data from this ByteBuffer,
@@ -189,20 +186,20 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 					totalBytesRead += bytesThisRead;
 					payload.readBufs.add(bb);
 					bb.flip();
-					logger.debug("Got " + bytesThisRead + " bytes this read: " +
-							RPCUtil.strBuf(bb));
+					//logger.debug("Got " + bytesThisRead + " bytes this read: " +
+					//		RPCUtil.strBuf(bb));
 				} while(bb.hasRemaining());
-				logger.debug("Read " + totalBytesRead + " total bytes");
+				//logger.debug("Read " + totalBytesRead + " total bytes");
 				if(totalBytesRead == 0) {
-					logger.debug("Checking if connected");
+					//logger.debug("Checking if connected");
 					if(!schan.isConnected()) {
 						logger.debug("Socket disconnected, closing");
 						isEndOfStream = true;
 					}
 				} else {
 					payload.is = new BBInputStream(payload.readBufs);
-					logger.debug("SelectorStage sending payload with " + 
-							payload.is.available() + " bytes");
+					//logger.debug("SelectorStage sending payload with " + 
+					//		payload.is.available() + " bytes");
 					server.enqueue(payload, nextStage, payload.finisher);
 				}
 			}
@@ -211,12 +208,12 @@ public class SelectorStage<T extends SocketPayload> implements Stage<T> {
 			// and only if there's pending output.
 			int interestOps;
 			if(payload.peekPendingOutput() == null) {
-				logger.debug("No pending output for socket, selecting for " +
-						"read only");
+				//logger.debug("No pending output for socket, selecting for " +
+				//		"read only");
 				interestOps = SelectionKey.OP_READ;
 			} else {
-				logger.debug("Pending output for socket, selecting for " +
-						"writability");
+				//logger.debug("Pending output for socket, selecting for " +
+				//		"writability");
 				interestOps = SelectionKey.OP_READ | SelectionKey.OP_WRITE;
 				schan.register(selector, interestOps, payload);
 			}

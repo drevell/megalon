@@ -7,11 +7,15 @@ import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.TreeMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.megalon.Config.Host;
 
 public class Util {
+	static Log logger = LogFactory.getLog(Util.class);
 	public static SocketChannel connectTo(Host host) throws IOException {
 		InetAddress hostAddr = InetAddress.getByName(host.nameOrAddr);
 		InetSocketAddress addr = new InetSocketAddress(hostAddr, host.port);
@@ -61,11 +65,11 @@ public class Util {
 	 */
 	static public int bytesToInt(byte[] bs) {
 		assert bs.length == 4;
-			
 		int x = 0;
 		for(int i=0; i<4; i++) {
 			x <<= 8;
-			x += bs[i];
+			x |= ((int)bs[i]) & 0xFF;  // The "& 0xFF" undoes sign extension
+			                           // that happens when bs[i] becomes an int
 		}
 		return x;
 	}
@@ -114,6 +118,5 @@ public class Util {
 				millis -= (nowTimeMs - startTimeMs);
 			}
 		}
-	}
-	
+	}	
 }

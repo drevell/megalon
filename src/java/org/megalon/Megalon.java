@@ -12,6 +12,9 @@ import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.client.HTablePool;
 import org.megalon.Config.Host;
 
 public class Megalon {
@@ -27,6 +30,8 @@ public class Megalon {
 	protected UUID uuid;
 	protected Map<Host,RPCClient> replSrvSockets =
 		new HashMap<Host,RPCClient>();
+	Configuration hconf = HBaseConfiguration.create(); // TODO HBase address
+	protected HTablePool hTablePool = new HTablePool(hconf, Integer.MAX_VALUE);
 	
 	public Megalon(Config config) throws Exception {
 		ReplServer replServ = null;
@@ -115,5 +120,31 @@ public class Megalon {
 		return replSrvSockets;
 	}
 
-
+	/**
+	 * Get the Configuration object that gives the server locations and other 
+	 * config for HBase connections.
+	 */
+	public Configuration getHbaseConf() {
+		return hconf;
+	}
+	
+	/**
+	 * Ordering the replicas by their name, what is the index of this replica?
+	 * We use this for choosing initial Paxos n values.
+	 */
+	public int myReplicaNumber() {
+		// We choose an initial Paxos n equal to our replica number 
+		int i = 0;
+		for(String replName: config.replicas.keySet()) {
+			if(replName.equals(config.myReplica.name)) {
+				return i;
+			}
+			i++;
+		}
+		throw new AssertionError("Couldn't find this replica?!?");
+	}
+	
+	public HTablePool getHTablePool() {
+		return hTablePool;
+	}
 }

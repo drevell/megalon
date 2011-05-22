@@ -62,7 +62,7 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 	
 	public NextAction<MSocketPayload> runStage(MSocketPayload payload) throws
 	IOException {
-		logger.debug("In AvroRpcDecode.runStage");
+		//logger.debug("In AvroRpcDecode.runStage");
 		if(!inited) {
 			logger.error("AvroRpcDecode run before init?!?");
 			return new NextAction<MSocketPayload>(Action.FINISHED, null);
@@ -72,7 +72,7 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 			try {
 				if(!RPCUtil.hasCompleteMessage(payload.readBufs)) {
 					payload.continueReading = true;
-					logger.debug("Don't have complete msg, back to selector");
+					//logger.debug("Don't have complete msg, back to selector");
 					return new NextAction<MSocketPayload>(Action.FORWARD, 
 						selectorStage);
 				}
@@ -84,7 +84,7 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 			
 			// Read the incoming msg length prefix, and sanity check it
 			int msgLen = RPCUtil.extractInt(payload.readBufs);
-			logger.debug("Incoming msgLen " + msgLen);
+			//logger.debug("Incoming msgLen " + msgLen);
 			int minReqdBytes = RPCUtil.RPC_HEADER_SIZE - 4;
 			if (msgLen < minReqdBytes) {
 				logger.warn("Message was too short to contain "
@@ -100,12 +100,12 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 			
 			// Extract unique RPC request ID
 			payload.rpcSerial = RPCUtil.extractLong(payload.readBufs);
-			logger.debug("Incoming request serial is " + payload.rpcSerial);
+			//logger.debug("Incoming request serial is " + payload.rpcSerial);
 			
 			// Extract message body
 			List<ByteBuffer> msg = RPCUtil.extractBufs(msgLen-Long.SIZE/8, 
 					payload.readBufs);
-			logger.debug("Extracted msg is: " + RPCUtil.strBufs(msg));
+			//logger.debug("Extracted msg is: " + RPCUtil.strBufs(msg));
 
 			byte msgType = RPCUtil.extractByte(msg);
 			ByteBufferInputStream msgIs = new ByteBufferInputStream(msg);
@@ -121,6 +121,7 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 						msgType);
 				return new NextAction<MSocketPayload>(Action.FINISHED, null);
 			}
+			//logger.debug("Reading avro message of expected class: " + avroClass);
 			DatumReader reader = new SpecificDatumReader(avroClass);
 			Object avroMsg = reader.read(null, dec);
 			

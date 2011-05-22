@@ -10,4 +10,16 @@ import java.io.IOException;
  */
 public class TooConcurrent extends IOException {
 	private static final long serialVersionUID = 1L;
+	
+	public TooConcurrent() {
+		super();
+	}
+	
+	public TooConcurrent(Throwable e) {
+		super(e);
+	}
+	
+	public TooConcurrent(String msg) {
+		super(msg);
+	}
 }

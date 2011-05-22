@@ -91,7 +91,7 @@ public class SocketAccepter<T extends SocketPayload> {
 			servChan.socket().bind(new InetSocketAddress(addr, port));
 		
 			while(true) {
-				logger.debug("To accept()");
+				//logger.debug("To accept()");
 				SocketChannel acceptedChan = servChan.accept();
 				InetSocketAddress remoteAddr = (InetSocketAddress)
 					acceptedChan.socket().getRemoteSocketAddress();

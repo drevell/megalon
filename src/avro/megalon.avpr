@@ -6,22 +6,32 @@
         {
             "name": "AvroWALEntryStatus",
             "type": "enum",
-            "symbols": ["NEW", "PREPARED", "ACCEPTED", "CHOSEN"]
+            "symbols": ["NEW", "PREPARED", "ACCEPTED", "CHOSEN", "FLUSHED"]
         },
         {
             "name": "AvroAckOrNack",
             "type": "enum",
             "symbols": ["ACK", "NACK"]
         },
+        // AvroWriteVal removed in favor of serialized HBase Row objects
+        //{
+        //    "name": "AvroWriteVal",
+        //    "type": "record",
+        //    "fields": [
+        //        // TODO optimize by removing table and cf name when possible
+        //        {"name": "table", "type":  "bytes"},
+        //        {"name": "cf", "type": "bytes"},
+        //        {"name": "col", "type": "bytes"},
+        //        {"name": "value", "type": "bytes"}
+        //    ]
+        //},
         {
-            "name": "AvroWriteVal",
+            "name": "AvroOneTableBatch",
             "type": "record",
             "fields": [
-                // TODO optimize by removing table and cf name when possible
-                {"name": "table", "type":  "bytes"},
-                {"name": "cf", "type": "bytes"},
-                {"name": "col", "type": "bytes"},
-                {"name": "value", "type": "bytes"}
+                {"name": "table", "type": "bytes"},
+                {"name": "puts", "type": ["bytes", "null"]},
+                {"name": "deletes", "type": ["bytes", "null"]}
             ]
         },
         {
@@ -30,7 +40,8 @@
             "fields": [
                 {"name": "n", "type": "long"},
                 {"name": "status", "type": "AvroWALEntryStatus"},
-                {"name": "values", "type": [{"type": "array", "items": "AvroWriteVal"}, "null"]}
+                //{"name": "values", "type": [{"type": "array", "items": "AvroWriteVal"}, "null"]}
+                {"name": "values", "type": [{"type": "array", "items": "AvroOneTableBatch"}, "null"]}
             ]
         },
 
@@ -96,6 +107,14 @@
             "type": "record",
             "fields": [
                 {"name": "isValid", "type": "boolean"}
+            ]
+        },
+        {
+            "name": "AvroChosen",
+            "type": "record",
+            "fields": [
+                {"name": "entityGroup", "type": "bytes"},
+                {"name": "walIndex", "type": "long"}
             ]
         }
     ]

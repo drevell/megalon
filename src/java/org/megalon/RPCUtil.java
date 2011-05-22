@@ -55,6 +55,7 @@ public class RPCUtil {
 			}
 			if(bytesGotten == 4) {
 				int msgLengthField = Util.bytesToInt(lengthBytes);
+				//logger.debug("Incoming msg length is: " + msgLengthField);
 				if(msgLengthField < RPC_HEADER_SIZE-4) {
 					throw new IOException("Message was too short to contain " +
 							"required fields");

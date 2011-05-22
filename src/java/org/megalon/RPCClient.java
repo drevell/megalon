@@ -72,7 +72,10 @@ public class RPCClient {
 	}
 	
 	/**
-	 * Add a list of ByteBuffers to the pending output queue.
+	 * Add a list of ByteBuffers to the pending output queue. If the payload 
+	 * parameter is not null, its ack() method will be called when a response
+	 * is received, or its nack() method will be called if there is an error,
+	 * or the request times out.  
 	 * TODO limit the size of the output buffer
 	 */
 	public boolean write(List<ByteBuffer> outBufs, AckPayload payload) {
@@ -91,15 +94,19 @@ public class RPCClient {
 		}
 		outBufs.add(0, ByteBuffer.wrap(Util.intToBytes(length)));
 		
-		logger.debug("Outgoing bufs: " + RPCUtil.strBufs(outBufs));
+		//logger.debug("Outgoing bufs: " + RPCUtil.strBufs(outBufs));
 		
 		// Set up the caller to receive the response, when it arrives
 		synchronized(this) {
-			Waiter waiter = new Waiter(payload.getFinishTimeMs(), reqSerial, payload);
-			logger.debug("Setting up waiter on " + replica + " for serial: " + 
-					reqSerial);
-			reqBySerial.put(reqSerial, waiter);
-			reqByTimeout.add(waiter);
+			if(payload != null) {
+				// If the caller wants to be notified of responses, the incoming
+				// payload parameter will be non-null/
+				Waiter waiter = new Waiter(payload.getFinishTimeMs(), reqSerial, payload);
+				logger.debug("Setting up waiter on " + replica + " for serial: " + 
+						reqSerial);
+				reqBySerial.put(reqSerial, waiter);
+				reqByTimeout.add(waiter);
+			}
 			this.outBufs.addAll(outBufs); // Add output to queue
 		}
 		
@@ -117,6 +124,9 @@ public class RPCClient {
 		synchronized(this) {
 			try {
 				failAllOutstanding();
+				if(selector != null) {
+					selector.close();
+				}
 				selector = Selector.open();
 				schan = SocketChannel.open(new InetSocketAddress(
 						host.nameOrAddr, host.port));
@@ -228,7 +238,7 @@ public class RPCClient {
 				break;
 			}
 			ByteBuffer bb = outBufs.getFirst();
-			logger.debug("schan.write() for bb: " + RPCUtil.strBuf(bb));
+			//logger.debug("schan.write() for bb: " + RPCUtil.strBuf(bb));
 			bytesWritten = schan.write(bb);
 			if(bb.remaining() == 0) {
 				outBufs.removeFirst(); // TODO GC pressure
@@ -285,7 +295,7 @@ public class RPCClient {
 		}
 		// If any complete responses are in the incoming buffers, send them to
 		// the objects that are waiting for them.
-		logger.debug("readBuffers.size(): " + readBuffers.size());
+		//logger.debug("readBuffers.size(): " + readBuffers.size());
 		dispatchResponses(readBuffers);
 	}
 	
@@ -295,31 +305,35 @@ public class RPCClient {
 	 * respective waiting payload objects.
 	 */
 	void dispatchResponses(List<ByteBuffer> readBufs) throws IOException {
-		logger.debug("dispatchResponses: " + RPCUtil.strBufs(readBufs));
+		//logger.debug("dispatchResponses: " + RPCUtil.strBufs(readBufs));
 		while(RPCUtil.hasCompleteMessage(readBufs)) {
-			logger.debug("Have a complete message");
+			//logger.debug("Have a complete message");
 			int msgLen = Util.bytesToInt(RPCUtil.extractBytes(INT_NBYTES, 
 					readBufs));
 			long reqSerial = Util.bytesToLong(RPCUtil.extractBytes(LONG_NBYTES,
 					readBufs));
-			logger.debug("Dispatching a message, length=" + msgLen + 
-					" serial=" + reqSerial);
+			//logger.debug("Dispatching a message, length=" + msgLen + 
+			//		" serial=" + reqSerial);
 			
 			// Copy the message body to the waiting payload 
 			int bytesToCopy = msgLen - LONG_NBYTES;
 			List<ByteBuffer> response = RPCUtil.extractBufs(bytesToCopy, readBufs);
-			logger.debug("Extracted response: " + RPCUtil.strBufs(response));
+			//logger.debug("Extracted response: " + RPCUtil.strBufs(response));
 			Waiter waiter;
 			synchronized(this) {
 				waiter = reqBySerial.remove(reqSerial);
 				if(waiter == null) {
 					logger.debug("Response for timed-out request (fine)");
 				} else {
-					logger.debug("Response for valid waiter");
+					//logger.debug("Response for valid waiter");
 					boolean didRemove = reqByTimeout.remove(waiter);
 					assert didRemove;
 					waiter.payload.replResponses.remoteResponse(replica, response);
 				}
+			}
+			// Remove any exhausted ByteBuffers from the input queue
+			while(!readBufs.isEmpty() && readBufs.get(0).remaining() == 0) {
+				readBufs.remove(0);
 			}
 		}
 	}

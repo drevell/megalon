@@ -4,10 +4,12 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.apache.commons.logging.Log;
@@ -106,7 +108,7 @@ public class Config {
 				"config global section should have a %t \"%k\"", zk_path);
 
 		// The global section contains a list of replica descriptions
-		replicas = new HashMap<String,ReplicaDesc>();
+		replicas = new TreeMap<String,ReplicaDesc>();
 		List replList = (List)safeGet(globalConf, List.class, "replicas", 
 				"config global section should have a value \"%k\" giving a " +
 				" sequence of replica descriptions", null);
@@ -207,7 +209,7 @@ public class Config {
 		return new Host(host, port);
 	}
 	
-	public class ReplicaDesc {
+	static public class ReplicaDesc {
 		String name;
 		List<Host> hbase;
 		List<Host> coord;

@@ -278,11 +278,11 @@ public class MultiStageServer<T extends Payload> {
 			try {
 				payload.barrier = true; // memory barrier
 				nextAction = stageToRun.runStage(payload);
-				logger.debug("StageRunner stage finished: "
-						+ stageToRun.getName());
+				// logger.debug("StageRunner stage finished: "
+				//		+ stageToRun.getName());
 			} catch (Throwable e) {
-				errException = new Exception("Exception in stage: "
-						+ stageToRun.getName(), e);
+				errException = new Exception("Exception in server: " + name + 
+						", stage: " + stageToRun.getName(), e);
 				nextAction = new NextAction<T>(Action.FINISHED, null);
 			}
 

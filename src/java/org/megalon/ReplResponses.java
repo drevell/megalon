@@ -50,8 +50,7 @@ public class ReplResponses<T extends AckPayload> {
 	 */
 	synchronized public void remoteResponse(String replica, List<ByteBuffer> response) {
 		assert inited;
-		logger.debug("Ack from " + replica + " with: " + 
-				RPCUtil.strBufs(response));
+		//logger.debug("Ack from " + replica + " with: " + RPCUtil.strBufs(response));
 		remoteResponses.put(replica, response);
 		numAcks++;
 		enqueueIfAllResponses();
@@ -94,10 +93,10 @@ public class ReplResponses<T extends AckPayload> {
 		if(numResponses == expectedResponses) {
 			server.enqueue(payload, nextStage, 
 					payload.finisher);
-			logger.debug("enqueueIfAllResponses: all responded, enqueueing");
+			//logger.debug("enqueueIfAllResponses: all responded, enqueueing");
 			allResponses = true;
 		} else {
-			logger.debug("enqueueIfAllResponses: not enough yet");
+			//logger.debug("enqueueIfAllResponses: not enough yet");
 		}
 	}
 	

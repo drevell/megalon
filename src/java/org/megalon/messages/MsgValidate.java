@@ -19,8 +19,11 @@ public class MsgValidate extends MegalonMsg {
 		super(MSG_ID);
 		this.walIndex = avroValidate.walIndex;
 		this.isValid = avroValidate.isValid;
-		this.entityGroup = new byte[avroValidate.entityGroup.remaining()];
-		avroValidate.entityGroup.get(this.entityGroup);
+		
+		assert avroValidate.entityGroup.remaining() == avroValidate.entityGroup.capacity();
+		this.entityGroup = avroValidate.entityGroup.array();
+//		this.entityGroup = new byte[avroValidate.entityGroup.remaining()];
+//		avroValidate.entityGroup.get(this.entityGroup);
 	}
 	
 	public MsgValidate(byte[] entityGroup, long walIndex, boolean isValid) {

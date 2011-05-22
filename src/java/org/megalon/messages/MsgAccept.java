@@ -1,5 +1,6 @@
 package org.megalon.messages;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.megalon.WALEntry;
@@ -12,14 +13,16 @@ public class MsgAccept extends MegalonMsg {
 	public final long walIndex;
 	public final byte[] entityGroup;
 	
-	public MsgAccept(AvroAccept avroAccept) {
+	public MsgAccept(AvroAccept avroAccept) throws IOException {
 		super(MSG_ID);
 
 		this.walEntry = new WALEntry(avroAccept.walEntry);
 		this.walIndex = avroAccept.walIndex;
 		
-		this.entityGroup = new byte[avroAccept.entityGroup.remaining()];
-		avroAccept.entityGroup.get(this.entityGroup);
+		assert avroAccept.entityGroup.remaining() == avroAccept.entityGroup.capacity();
+		this.entityGroup = avroAccept.entityGroup.array();
+//		this.entityGroup = new byte[avroAccept.entityGroup.remaining()];
+//		avroAccept.entityGroup.get(this.entityGroup);
 	}
 	
 	public MsgAccept(WALEntry walEntry, long walIndex, byte[] entityGroup) {

@@ -15,8 +15,10 @@ public class MsgCheckValid extends MegalonMsg {
 	
 	public MsgCheckValid(AvroCheckValid avro) {
 		super(MSG_ID);
-		entityGroup = new byte[avro.entityGroup.remaining()];
-		avro.entityGroup.get(entityGroup);
+		assert avro.entityGroup.remaining() == avro.entityGroup.capacity();
+		this.entityGroup = avro.entityGroup.array();
+//		entityGroup = new byte[avro.entityGroup.remaining()];
+//		avro.entityGroup.get(entityGroup);
 	}
 	
 	public AvroCheckValid toAvro() {

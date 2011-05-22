@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -25,15 +26,19 @@ import org.apache.avro.util.ByteBufferInputStream;
 import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.client.Delete;
+import org.apache.hadoop.hbase.client.Put;
 import org.megalon.Config.Host;
 import org.megalon.Config.ReplicaDesc;
 import org.megalon.WALEntry.Status;
 import org.megalon.avro.AvroAccept;
 import org.megalon.avro.AvroAcceptResponse;
+import org.megalon.avro.AvroChosen;
 import org.megalon.avro.AvroPrepare;
 import org.megalon.avro.AvroPrepareResponse;
 import org.megalon.messages.MsgAccept;
 import org.megalon.messages.MsgAcceptResp;
+import org.megalon.messages.MsgChosen;
 import org.megalon.messages.MsgPrepare;
 import org.megalon.messages.MsgPrepareResp;
 import org.megalon.multistageserver.BBInputStream;
@@ -67,10 +72,15 @@ public class PaxosServer {
 		this.server = new MultiStageServer<MPaxPayload>("paxosSvr", serverStages);
 	}
 	
-	public Future<Boolean> commit(WALEntry walEntry, byte[] eg, 
-			long timeoutMs) {
-		long walIndex = 0; // TODO this should be set by a read
+	public Future<Boolean> commit(Map<CmpBytes,List<Put>> puts, 
+	Map<CmpBytes,List<Delete>> deletes, byte[] eg, long timeoutMs, long walIndex) {
+		logger.debug("PaxosServer.commit has puts: " + puts + ", deletes: " +
+				deletes);
+		WALEntry walEntry = new WALEntry(puts, deletes);
+		
+		logger.debug("*** Packed walEntry: " + walEntry);
 		MPaxPayload payload = new MPaxPayload(eg, walEntry, walIndex, timeoutMs);
+		payload.workingEntry.n = megalon.myReplicaNumber();
 		server.enqueue(payload, sendPrepareStage, payload);
 		return new CommitFuture(payload);
 	}
@@ -83,17 +93,21 @@ public class PaxosServer {
 			// Assumes the chosen replica is up to date, which it will be if we 
 			// just did a read.
 			WALEntry existingEntry;
-			payload.workingEntry.n = 1;
+				
 			try {
 				existingEntry = wal.prepareLocal(payload.eg, payload.walIndex,
 						payload.workingEntry.n);
 			} catch(IOException e) {
 				return new NextAction<MPaxPayload>(Action.FINISHED, null);
 			}
-			if(existingEntry != null && 
-					existingEntry.n >= payload.requestedEntry.n) {
+			if(existingEntry != null) {
 				payload.workingEntry = existingEntry;
-				payload.usedOtherEntry = true;
+				// Important step: choose a new, higher proposal n value.
+				// Remember that this replica can only use values of n where
+				// n % num_replicas = my_replica_number
+				payload.workingEntry.n += megalon.config.replicas.size();
+			} else {
+				payload.proposedOwnValue = true;
 			}
 
 			Collection<ReplicaDesc> replicas = megalon.config.replicas.values();
@@ -180,12 +194,12 @@ public class PaxosServer {
 					continue;
 				}
 				byte msgType = RPCUtil.extractByte(replicaBytes);
-				logger.debug("Msg type is: " + msgType);
+				//logger.debug("Msg type is: " + msgType);
 				assert msgType == MsgPrepareResp.MSG_ID;
-				logger.debug("Good response from replica: " + e.getKey());
+				//logger.debug("Good response from replica: " + e.getKey());
 				
 				numValidResponses++;
-				logger.debug("Invoking decoder on: " + RPCUtil.strBufs(replicaBytes));
+				//logger.debug("Invoking decoder on: " + RPCUtil.strBufs(replicaBytes));
 				InputStream is = new BBInputStream(replicaBytes);
 				
 				dec = DecoderFactory.get().binaryDecoder(is, dec);
@@ -193,8 +207,7 @@ public class PaxosServer {
 				if(avroPrepResp.walEntry != null) {
 					if(avroPrepResp.walEntry.n > payload.workingEntry.n) {
 						payload.workingEntry = new WALEntry(avroPrepResp.walEntry);
-						payload.usedOtherEntry = true;
-						logger.debug("New best entry: " + payload.workingEntry);
+						//logger.debug("New best entry: " + payload.workingEntry);
 					}
 				}
 			}
@@ -226,6 +239,7 @@ public class PaxosServer {
 		}
 		
 		List<ByteBuffer> encodedAccept(byte[] eg, WALEntry entry, long walIndex) {
+			logger.debug("Making encoded accept with walEntry: " + entry);
 			MsgAccept msgAccept = new MsgAccept(entry, walIndex, eg);
 			AvroAccept avroAccept = msgAccept.toAvro();
 			// TODO share/reuse/pool these objects, GC pressure
@@ -297,20 +311,20 @@ public class PaxosServer {
 					continue;
 				}
 				byte msgType = RPCUtil.extractByte(replicaBytes);
-				logger.debug("Msg type is: " + msgType);
+				//logger.debug("Msg type is: " + msgType);
 				assert msgType == MsgAcceptResp.MSG_ID;
 				
-				logger.debug("Invoking decoder on: " + RPCUtil.strBufs(replicaBytes));
+				//logger.debug("Invoking decoder on: " + RPCUtil.strBufs(replicaBytes));
 				InputStream is = new ByteBufferInputStream(replicaBytes);
 				dec = DecoderFactory.get().binaryDecoder(is, dec);
 
 				avroAcceptResp = acceptRespReader.read(avroAcceptResp, dec);
 				if(avroAcceptResp.acked) {
-					logger.debug("Ack response from replica: " + e.getKey());
+					//logger.debug("Ack response from replica: " + e.getKey());
 					numAcks++;
 				} else {
-					logger.debug("Affirmative nack response from replica: " + 
-							e.getKey());
+					//logger.debug("Affirmative nack response from replica: " + 
+					//		e.getKey());
 				}
 			}
 			
@@ -318,6 +332,11 @@ public class PaxosServer {
 				logger.debug("Quorum of accept-responses!");
 				payload.workingEntry.status = Status.CHOSEN;
 				wal.putWAL(payload.eg, payload.walIndex, payload.workingEntry);
+				ReplServer.applyChanges(megalon, payload.workingEntry);
+				List<ByteBuffer> chosenBufs = encodedChosenMsg(payload.eg, 
+						payload.walIndex);
+				logger.debug("Sending chosen msg to remote replicas");
+				sendToRemoteReplicas(replicas, chosenBufs, null);
 			} else {
 				logger.debug("Accept-response quorum failed");
 				if(payload.commitTries < MAX_COMMIT_TRIES) {
@@ -328,11 +347,27 @@ public class PaxosServer {
 				}
 			}
 
-			if(payload.usedOtherEntry) {
-				logger.debug("We accepted someone else's value");
-			} else {
+			/*
+			 * A subtle point: this is how we detect if the Paxos chosen 
+			 * value was the one proposed by this client. This client's value
+			 * was chosen if and only if these two things are true:
+			 * 
+			 * 1. The field "payload.proposedOwnValue" is true, implying that
+			 * this client was the first client for this replica to propose a
+			 * value. This client saw an empty WAL entry when it ran 
+			 * prepareLocal and wrote its own WAL entry. All later proposers
+			 * from the same replica would drop their own proposals and use
+			 * the proposal that this client wrote to the WAL. 
+			 * 2. The chosen value was from this replica. This is the case iff
+			 * the chosen value's n is one that would be chosen by this replica:
+			 * "n mod num_replicas" should be our own replica number.
+			 */
+			long paxChosenRepl = payload.workingEntry.n % megalon.config.replicas.size(); 
+			if(payload.proposedOwnValue && paxChosenRepl == megalon.myReplicaNumber()) {
 				logger.debug("We accepted our own proposed value. Hooray");
 				payload.committed = true;
+			} else {
+				logger.debug("We accepted someone else's value");
 			}
 			return new NextAction<MPaxPayload>(Action.FINISHED, null);
 		}
@@ -349,6 +384,20 @@ public class PaxosServer {
 			return 10;
 		}
 
+		List<ByteBuffer> encodedChosenMsg(byte[] entityGroup, long walIndex) 
+		throws IOException {
+			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
+			bbos.write(MsgChosen.MSG_ID);
+			final DatumWriter<AvroChosen> writer = 
+				new SpecificDatumWriter<AvroChosen>(AvroChosen.class);
+			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
+			AvroChosen chosenMsg = new MsgChosen(entityGroup, walIndex).toAvro();
+			writer.write(chosenMsg, enc);
+			enc.flush();
+			bbos.flush();
+			return bbos.getBufferList();
+		}
+		
 		public void setServer(MultiStageServer<MPaxPayload> server) {}
 	}
 	
@@ -413,7 +462,7 @@ public class PaxosServer {
 			boolean aHostSucceeded = false;
 			for(Host host: (List<Host>)Util.shuffled(replicaDesc.replsrv)) {
 				outBytesThisRepl = RPCUtil.duplicateBufferList(outBytes);
-				logger.debug("bytes this repl: " + RPCUtil.strBufs(outBytesThisRepl));
+				//logger.debug("bytes this repl: " + RPCUtil.strBufs(outBytesThisRepl));
 				RPCClient rpcCli = megalon.clientData.getReplSrvSocket(host);
 				aHostSucceeded |= rpcCli.write(outBytesThisRepl, payload);
 				if(!aHostSucceeded) {

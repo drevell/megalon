@@ -39,6 +39,11 @@ public class AvroRpcEncode implements Stage<MSocketPayload> {
 	}
 	
 	public NextAction<MSocketPayload> runStage(MSocketPayload payload) {
+		if(payload.resp == null) {
+			// There is no response to send to the remote client. That was easy.
+			logger.debug("No response for client, exiting encode stage");
+			return new NextAction<MSocketPayload>(Action.FORWARD, selectorStage);
+		}
 		Class<? extends MegalonMsg> megalonClass = payload.resp.getClass();
 		Class<? extends SpecificRecordBase> avroClass = msgClasses.get(megalonClass);
 		if(avroClass == null) {
@@ -62,15 +67,14 @@ public class AvroRpcEncode implements Stage<MSocketPayload> {
 			int numOutBytes = Long.SIZE/8;
 			LinkedList<ByteBuffer> bbList = (LinkedList)os.getBufferList();
 //			bbList.addFirst(ByteBuffer.wrap(new byte[] {payload.resp.getMsgId()}));
-			logger.debug("Encoded response: " + 
-					RPCUtil.strBufs(bbList));
+			//logger.debug("Encoded response: " + RPCUtil.strBufs(bbList));
 			for(ByteBuffer bb: bbList ) {
 				numOutBytes += bb.remaining();
 			}
 			
-			logger.debug("Writing serial: " + payload.rpcSerial);
+			//logger.debug("Writing serial: " + payload.rpcSerial);
 			bbList.addFirst(ByteBuffer.wrap(Util.longToBytes(payload.rpcSerial)));
-			logger.debug("Writing buffer length: " + numOutBytes);
+			//logger.debug("Writing buffer length: " + numOutBytes);
 			bbList.addFirst(ByteBuffer.wrap(Util.intToBytes(numOutBytes)));
 //			os.write(Util.intToBytes(numOutBytes));
 //			os.write(Util.longToBytes(payload.rpcSerial));

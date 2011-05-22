@@ -3,6 +3,8 @@ package org.megalon;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.megalon.Config.Host;
 import org.megalon.Config.ReplicaDesc;
 
@@ -71,4 +73,6 @@ public class ClientSharedData {
 	public RPCClient getReplSrvSocket(Host host) {
 		return replServerSockets.get(host);
 	}
+	
+
 }

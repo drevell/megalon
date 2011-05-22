@@ -4,9 +4,10 @@ import java.io.IOException;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.megalon.messages.MegalonMsg;
+import org.megalon.WALEntry.Status;
 import org.megalon.messages.MsgAccept;
 import org.megalon.messages.MsgAcceptResp;
+import org.megalon.messages.MsgChosen;
 import org.megalon.messages.MsgPrepare;
 import org.megalon.messages.MsgPrepareResp;
 import org.megalon.multistageserver.MultiStageServer;
@@ -21,13 +22,15 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MPayload> 
 	Log logger = LogFactory.getLog(ReplRemoteHandlerStage.class);
 	MultiStageServer<MPayload> server;
 	WAL wal;
+	ReplServer replServer;
 	
-	public ReplRemoteHandlerStage(WAL wal) {
+	public ReplRemoteHandlerStage(ReplServer replServer, WAL wal) {
+		this.replServer = replServer;
 		this.wal = wal;
 	}
 	
 	public NextAction<MPayload> runStage(MPayload payload) throws Exception {
-		logger.debug("ReplExecStage running");
+		// logger.debug("ReplExecStage running");
 		switch(payload.msgType) {
 		case MsgPrepare.MSG_ID:
 			MsgPrepare prepMsg = (MsgPrepare)payload.req;
@@ -45,6 +48,7 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MPayload> 
 			MsgAccept accMsg = (MsgAccept)payload.req;
 			boolean result;
 			try {
+				logger.debug("Accept for walEntry: " + accMsg.walEntry);
 				result = wal.acceptLocal(accMsg.entityGroup, accMsg.walIndex, 
 						accMsg.walEntry);
 				logger.debug("Repl core: acceptLocal returned " + result);
@@ -53,6 +57,22 @@ public class ReplRemoteHandlerStage implements MultiStageServer.Stage<MPayload> 
 				result = false;
 			}
 			payload.resp = new MsgAcceptResp(result);
+			break;
+		case MsgChosen.MSG_ID:
+			// We must have sent an accept-ack for a value which turned out to
+			// be the Paxos chosen value, which caused the proposer to send us
+			// a Chosen message to inform us. Since the value in our WAL is the
+			// Paxos chosen value, we will write its changes to the main 
+			// database.
+			MsgChosen chosenMsg = (MsgChosen)payload.req;
+			logger.debug("ReplServer marking walIndex chosen: " + chosenMsg.walIndex);
+			WALEntry walEntry = wal.changeWalStatus(chosenMsg.entityGroup, 
+					chosenMsg.walIndex, Status.CHOSEN);
+			logger.debug("Applying changes: " + walEntry);
+			if(ReplServer.applyChanges(replServer.megalon, walEntry)) {
+				wal.changeWalStatus(chosenMsg.entityGroup, chosenMsg.walIndex, 
+						Status.FLUSHED);
+			}
 			break;
 		default:
 			logger.warn("Unrecognized msg type: " + payload.msgType);
