@@ -12,23 +12,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.DatumWriter;
-import org.apache.avro.io.Decoder;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.io.Encoder;
-import org.apache.avro.io.EncoderFactory;
-import org.apache.avro.specific.SpecificDatumReader;
-import org.apache.avro.specific.SpecificDatumWriter;
-import org.apache.avro.util.ByteBufferInputStream;
-import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.Config.Host;
 import org.megalon.Config.ReplicaDesc;
-import org.megalon.avro.AvroCheckValid;
-import org.megalon.avro.AvroCheckValidResp;
-import org.megalon.avro.AvroValidate;
 import org.megalon.messages.MsgCheckValid;
 import org.megalon.messages.MsgCheckValidResp;
 import org.megalon.messages.MsgValidate;
@@ -64,7 +51,7 @@ public class CoordClient {
 	ValidateEncStage validateEncStage;
 	ValidateRespDecStage validateRespDecStage;
 	
-	public CoordClient(Megalon megalon) throws Exception {
+	public CoordClient(Megalon megalon) throws IOException {
 		this.megalon = megalon;
 		chkvEncStage = new ChkvEncStage();
 		chkvrespDecStage = new ChkvrespDecStage();
@@ -199,19 +186,9 @@ public class CoordClient {
 						new LocalCoordFinisher(payload));
 			} else {
 				// The target coordinator is not in this JVM. Use Avro.
-				AvroCheckValid avro = new AvroCheckValid();
-				avro.entityGroup = ByteBuffer.wrap(payload.entityGroup);
-				ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-				// TODO reuse
-				Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
-				DatumWriter<AvroCheckValid> writer = 
-					new SpecificDatumWriter<AvroCheckValid>(AvroCheckValid.class);
-				writer.write(avro, enc);
-				enc.flush();
-				bbos.flush();
-				List<ByteBuffer> outBufs = bbos.getBufferList();
-				outBufs.add(0, ByteBuffer.wrap(new byte[] {MsgCheckValid.MSG_ID}));
-	
+				List<ByteBuffer> outBufs = RPCUtil.rpcBbEncode(
+						new MsgCheckValid(payload.entityGroup));
+
 				// We're waiting for one response, at which point processing should
 				// resume in rpcRespStage.
 				payload.replResponses = new ReplResponses<CoordCliPayload>(
@@ -265,14 +242,14 @@ public class CoordClient {
 				if(bbList == null) {
 					payload.egValid = false;
 				} else {
-					ByteBufferInputStream bbis = new ByteBufferInputStream(bbList);
-					// TODO reuse
-					Decoder dec = DecoderFactory.get().binaryDecoder(bbis, null);
-					DatumReader<AvroCheckValidResp> reader = 
-						new SpecificDatumReader<AvroCheckValidResp>(AvroCheckValidResp.class);
-					AvroCheckValidResp avro = reader.read(null, dec);
-					MsgCheckValidResp megalonMsg = new MsgCheckValidResp(avro);
-					payload.egValid = megalonMsg.isValid;
+					byte msgId = RPCUtil.extractByte(bbList);
+					if(msgId != MsgCheckValidResp.MSG_ID) {
+						logger.debug("Expected MsgCheckValidResp, got msgId " + 
+								msgId);
+					}
+					MsgCheckValidResp msg = (MsgCheckValidResp)RPCUtil.rpcDecode(
+							msgId, bbList);
+					payload.egValid = msg.isValid;
 				}
 			}	
 			return new NextAction<CoordCliPayload>(Action.FINISHED, null);
@@ -320,21 +297,9 @@ public class CoordClient {
 			assert payload.walIndex >= 0;
 			
 			// Encode the outgoing message as bytes using avro
-			AvroValidate avro = new AvroValidate();
-			avro.entityGroup = ByteBuffer.wrap(payload.entityGroup);
-			avro.walIndex = payload.walIndex;
-			avro.isValid = payload.validate;
-			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-			// TODO reuse
-			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
-			DatumWriter<AvroValidate> writer = 
-				new SpecificDatumWriter<AvroValidate>(AvroValidate.class);
-			writer.write(avro, enc);
-			enc.flush();
-			bbos.flush();
-			List<ByteBuffer> outBufs = bbos.getBufferList();
-			outBufs.add(0, ByteBuffer.wrap(new byte[] {MsgValidate.MSG_ID}));
-
+			List<ByteBuffer> outBufs = RPCUtil.rpcBbEncode(new MsgValidate(
+					payload.entityGroup, payload.walIndex, payload.validate));
+			
 			boolean coordInJvm = false;
 			if(megalon.config.run_coord) {
 				for(ReplicaDesc replDesc: payload.replicas) {

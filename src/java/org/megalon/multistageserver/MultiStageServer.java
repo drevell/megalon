@@ -1,5 +1,6 @@
 package org.megalon.multistageserver;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
@@ -62,7 +63,7 @@ public class MultiStageServer<T extends Payload> {
 	/**
 	 * Constructor that just wraps a call to init().
 	 */
-	public MultiStageServer(String name, Set<Stage<T>> stages) throws Exception {
+	public MultiStageServer(String name, Set<Stage<T>> stages) throws IOException {
 		init(name, stages);
 	}
 
@@ -94,7 +95,7 @@ public class MultiStageServer<T extends Payload> {
 	 *            finishers.
 	 */
 	public void init(String name, Set<Stage<T>> stages, ThreadPoolExecutor finisherExec)
-			throws Exception {
+			throws IOException {
 		this.name = name;
 		// Make a ThreadFactory that produces daemon threads
 		daemonThreadFactory = new ThreadFactory() {
@@ -126,7 +127,7 @@ public class MultiStageServer<T extends Payload> {
 	 * you don't know what a finisher executor pool is, this is the right init()
 	 * function for you.
 	 */
-	public void init(String name, Set<Stage<T>> stages) throws Exception {
+	public void init(String name, Set<Stage<T>> stages) throws IOException {
 		init(name, stages, null);
 	}
 
@@ -153,7 +154,7 @@ public class MultiStageServer<T extends Payload> {
 		ThreadPoolExecutor exec = execs.get(startStage);
 		if (exec == null) {
 			logger.warn("Enqueue into stage with null executor, server " + name,
-					new Exception()); // Exception will print stack trace
+					new IOException()); // Exception will print stack trace
 			return false;
 		} else {
 			// logger.debug("Before enqueue: " + Util.executorStatus(exec));
@@ -190,7 +191,7 @@ public class MultiStageServer<T extends Payload> {
 	 * For each server stage, set up a thread pool and queue of pending work.
 	 */
 	protected Map<Stage<T>, ThreadPoolExecutor> setupExecutors(
-			Set<Stage<T>> stages) throws Exception {
+			Set<Stage<T>> stages) throws IOException {
 		Map<Stage<T>, ThreadPoolExecutor> stageExecutors = new ConcurrentHashMap<Stage<T>, ThreadPoolExecutor>();
 		for (Stage<T> stage : stages) {
 			try {
@@ -204,7 +205,7 @@ public class MultiStageServer<T extends Payload> {
 			} catch (Throwable e) {
 				String errMsg = "Error initializing stage";
 				logger.error(errMsg, e);
-				throw new Exception(errMsg, e);
+				throw new IOException(errMsg, e);
 			}
 		}
 		return stageExecutors;

@@ -1,18 +1,11 @@
 package org.megalon;
 
 import java.io.IOException;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.Decoder;
-import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificRecordBase;
-import org.apache.avro.util.ByteBufferInputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.megalon.messages.MegalonMsg;
@@ -106,52 +99,14 @@ public class AvroRpcDecode implements Stage<MSocketPayload>, Finisher<MPayload> 
 			List<ByteBuffer> msg = RPCUtil.extractBufs(msgLen-Long.SIZE/8, 
 					payload.readBufs);
 			//logger.debug("Extracted msg is: " + RPCUtil.strBufs(msg));
+			byte msgId = RPCUtil.extractByte(msg);
+			MegalonMsg req = RPCUtil.rpcDecode(msgId, msg);
+			if(req == null) {
+				logger.debug("Msg failed decoding, bailing out");
+				return new NextAction<MSocketPayload>(Action.FINISHED, null);
+			}
 
-			byte msgType = RPCUtil.extractByte(msg);
-			ByteBufferInputStream msgIs = new ByteBufferInputStream(msg);
-			Decoder dec = 
-				DecoderFactory.get().binaryDecoder(msgIs, null);
-			
-			// Create an avro Reader of the correct type for this message, and
-			// read the incoming Avro object.
-			// TODO this could be more efficient wrt num of allocations
-			Class<? extends SpecificRecordBase> avroClass = msgTypes.get(msgType);
-			if(avroClass == null) {
-				logger.warn("Repl server saw unexpected message type: " +
-						msgType);
-				return new NextAction<MSocketPayload>(Action.FINISHED, null);
-			}
-			//logger.debug("Reading avro message of expected class: " + avroClass);
-			DatumReader reader = new SpecificDatumReader(avroClass);
-			Object avroMsg = reader.read(null, dec);
-			
-			// Convert the Avro object to a MegalonMsg object, which is the input
-			// to the core server.
-			Class<? extends MegalonMsg> megalonClass = megalonClasses.get(avroClass);
-			if(megalonClass == null) {
-				logger.error("No Megalon class for avro class: " + avroClass);
-				return new NextAction<MSocketPayload>(Action.FINISHED, null);
-			}
-			Constructor ctor;
-			MegalonMsg req;
-			try {
-				ctor = megalonClass.getConstructor(new Class[] {avroClass});
-				req = (MegalonMsg)ctor.newInstance(avroMsg);
-			} catch (NoSuchMethodException e) {
-				logger.error("Megalon class lacks the right constructor: " + 
-						megalonClass, e);
-				return new NextAction<MSocketPayload>(Action.FINISHED, null);
-			} catch (InvocationTargetException e) {
-				logger.warn("Megalon msg constructor threw exception", e);
-				return new NextAction<MSocketPayload>(Action.FINISHED, null);
-			} catch (IllegalAccessException e) {
-				logger.warn("Illegal access to megalon msg ctor", e);
-				return new NextAction<MSocketPayload>(Action.FINISHED, null);
-			} catch (InstantiationException e) {
-				logger.error("Can't instantiate abstract class", e);
-				return new NextAction<MSocketPayload>(Action.FINISHED, null);
-			}
-			MPayload newPayload = new MPayload(msgType, req, payload);
+			MPayload newPayload = new MPayload(msgId, req, payload);
 			coreServer.enqueue(newPayload, coreStage, this);
 			
 			// Discard ByteBuffers that we have read completely

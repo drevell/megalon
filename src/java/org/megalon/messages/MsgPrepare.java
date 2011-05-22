@@ -21,6 +21,13 @@ public class MsgPrepare extends MegalonMsg {
 //		this.entityGroup = new byte[avroPrepare.entityGroup.remaining()];
 //		avroPrepare.entityGroup.get(this.entityGroup);
 	}
+
+	public MsgPrepare(long n, long walIndex, byte[] entityGroup) {
+		super(MSG_ID);
+		this.n = n;
+		this.walIndex = walIndex;
+		this.entityGroup = entityGroup;
+	}
 	
 	public AvroPrepare toAvro() {
 		AvroPrepare avroPrep = new AvroPrepare();
@@ -29,4 +36,5 @@ public class MsgPrepare extends MegalonMsg {
 		avroPrep.entityGroup = ByteBuffer.wrap(entityGroup);
 		return avroPrep;
 	}
+	
 }

@@ -32,7 +32,7 @@ public class Client {
 	
 	Megalon megalon;
 	PaxosServer paxosServer;
-//	ReplicaSelector replSelector = null;
+	ReplicaChooser replSelector = null;
 	Log logger = LogFactory.getLog(Client.class);
 //	List<SingleWrite> queuedWrites = new LinkedList<SingleWrite>();
 //	Map<CmpBytes,List<Row>> queuedWrites = new HashMap<CmpBytes,List<Row>>();
@@ -108,7 +108,7 @@ public class Client {
 	 * milliseconds.
 	 */
 	public boolean commitSync(byte[] eg, long timeoutMs) throws IOException {
-//		ensureReplicaSelected();
+		ensureReplicaSelected();
 		try {
 			return paxosServer.commit(queuedPuts, queuedDeletes, eg, timeoutMs, 
 					walIndex).get();
@@ -134,7 +134,7 @@ public class Client {
 	 */
 	public Future<Boolean> commitAsync(byte[] eg, long timeoutMs) 
 	throws IOException {
-//		ensureReplicaSelected();
+		ensureReplicaSelected();
 		// TODO verify existence of cf for put/delete, before committing
 		return paxosServer.commit(queuedPuts, queuedDeletes, eg, timeoutMs, 
 				walIndex);
@@ -183,7 +183,7 @@ public class Client {
 			HTablePool hTablePool = megalon.getHTablePool();
 			HTableInterface hTable = null;
 			try {
-//				ensureReplicaSelected();
+				ensureReplicaSelected();
 				hTable = hTablePool.getTable(table);
 				hTable.batch(getsOnly, getResults);
 			} catch (IOException e) {
@@ -217,5 +217,9 @@ public class Client {
 		} else if(hbaseInterruptedException != null) {
 			throw hbaseInterruptedException;
 		}
+	}
+	
+	void ensureReplicaSelected() throws IOException {
+//		replSelector = ReplicaSelector(megalon);
 	}
 }

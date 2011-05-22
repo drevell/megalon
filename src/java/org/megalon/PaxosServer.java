@@ -16,32 +16,21 @@ import java.util.concurrent.TimeoutException;
 
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.DatumReader;
-import org.apache.avro.io.DatumWriter;
 import org.apache.avro.io.DecoderFactory;
-import org.apache.avro.io.Encoder;
-import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.specific.SpecificDatumReader;
-import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.util.ByteBufferInputStream;
-import org.apache.avro.util.ByteBufferOutputStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Put;
-import org.megalon.Config.Host;
 import org.megalon.Config.ReplicaDesc;
 import org.megalon.WALEntry.Status;
-import org.megalon.avro.AvroAccept;
 import org.megalon.avro.AvroAcceptResponse;
-import org.megalon.avro.AvroChosen;
-import org.megalon.avro.AvroPrepare;
-import org.megalon.avro.AvroPrepareResponse;
 import org.megalon.messages.MsgAccept;
 import org.megalon.messages.MsgAcceptResp;
 import org.megalon.messages.MsgChosen;
 import org.megalon.messages.MsgPrepare;
 import org.megalon.messages.MsgPrepareResp;
-import org.megalon.multistageserver.BBInputStream;
 import org.megalon.multistageserver.MultiStageServer;
 import org.megalon.multistageserver.MultiStageServer.Finisher;
 import org.megalon.multistageserver.MultiStageServer.NextAction;
@@ -118,7 +107,8 @@ public class PaxosServer {
 			List<ByteBuffer> outBytes = encodedPrepare(payload.eg, 
 					payload.walIndex, payload.workingEntry.n);
 			logger.debug("encodedPrepare gave" + RPCUtil.strBufs(outBytes));
-			int numFailedReplicas = sendToRemoteReplicas(replicas, outBytes, payload);
+			int numFailedReplicas = RPCUtil.sendToRemoteReplSvrs(megalon, 
+					replicas, outBytes, payload);
 
 			if(numFailedReplicas >= Util.quorumImpossible(numReplicas)) {
 				// Enough replicas failed that quorum is impossible. Fail fast.
@@ -143,24 +133,7 @@ public class PaxosServer {
 		public void setServer(MultiStageServer<MPaxPayload> server) {}
 
 		List<ByteBuffer> encodedPrepare(byte[] eg, long walIndex, long n) {
-			AvroPrepare avroPrepare = new AvroPrepare();
-			avroPrepare.walIndex = walIndex;
-			avroPrepare.n = n;
-			avroPrepare.entityGroup = ByteBuffer.wrap(eg);
-			// TODO share/reuse/pool these objects, GC pressure
-			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-			bbos.write(MsgPrepare.MSG_ID);
-			final DatumWriter<AvroPrepare> writer = 
-				new SpecificDatumWriter<AvroPrepare>(AvroPrepare.class);
-			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
-			try {
-				writer.write(avroPrepare, enc);
-				enc.flush();
-			} catch (IOException e) {
-				throw new AssertionError(e);  // Can't happen
-			}
-			List<ByteBuffer> bbList = bbos.getBufferList();
-			return bbList;
+			return RPCUtil.rpcBbEncode(new MsgPrepare(n, walIndex, eg));
 		}
 	}
 	
@@ -171,9 +144,6 @@ public class PaxosServer {
 				throws Exception {
 			// TODO pool/reuse to mitigate GC pressure
 			// TODO move Avro details behind an interface
-			DatumReader<AvroPrepareResponse> prepRespReader = 
-				new SpecificDatumReader<AvroPrepareResponse>(AvroPrepareResponse.class);
-			BinaryDecoder dec = null;
 			
 			// Track the "best known entry", starting with the local replica's
 			// entry since we already have it.
@@ -186,7 +156,6 @@ public class PaxosServer {
 			// normal Paxos. We'll use this value in accept messages below.
 			Set<Entry<String, List<ByteBuffer>>> responses = 
 				payload.replResponses.getRemoteResponses().entrySet();
-			AvroPrepareResponse avroPrepResp = new AvroPrepareResponse();
 			for(Entry<String,List<ByteBuffer>> e: responses) {
 				List<ByteBuffer> replicaBytes = e.getValue();
 				if(replicaBytes == null) {
@@ -195,21 +164,25 @@ public class PaxosServer {
 				}
 				byte msgType = RPCUtil.extractByte(replicaBytes);
 				//logger.debug("Msg type is: " + msgType);
-				assert msgType == MsgPrepareResp.MSG_ID;
+				if(msgType != MsgPrepareResp.MSG_ID) {
+					logger.debug("Expected a prepare-response, but msgId: " + msgType);
+					return new NextAction<MPaxPayload>(Action.FINISHED, null);
+				}
+				MsgPrepareResp resp = (MsgPrepareResp)RPCUtil.rpcDecode(msgType, 
+						replicaBytes);
 				//logger.debug("Good response from replica: " + e.getKey());
 				
 				numValidResponses++;
 				//logger.debug("Invoking decoder on: " + RPCUtil.strBufs(replicaBytes));
-				InputStream is = new BBInputStream(replicaBytes);
-				
-				dec = DecoderFactory.get().binaryDecoder(is, dec);
-				avroPrepResp = prepRespReader.read(avroPrepResp, dec);
-				if(avroPrepResp.walEntry != null) {
-					if(avroPrepResp.walEntry.n > payload.workingEntry.n) {
-						payload.workingEntry = new WALEntry(avroPrepResp.walEntry);
+
+				if(resp.walEntry != null) {
+					if(resp.walEntry.n > payload.workingEntry.n) {
+						payload.workingEntry = resp.walEntry;
 						//logger.debug("New best entry: " + payload.workingEntry);
 					}
 				}
+			
+			
 			}
 			int quorum = Util.quorum(numReplicas); // TODO replica set versions
 			if(numValidResponses < quorum) {
@@ -229,7 +202,8 @@ public class PaxosServer {
 			payload.replResponses.localResponse(wal.acceptLocal(payload.eg, 
 					payload.walIndex, payload.workingEntry));
 			
-			int numFailedReplicas = sendToRemoteReplicas(replicas, outBytes, payload);
+			int numFailedReplicas = RPCUtil.sendToRemoteReplSvrs(megalon, 
+					replicas, outBytes, payload);
 			if(numFailedReplicas >= Util.quorumImpossible(numReplicas)) {
 				// Enough replicas failed that quorum is impossible. Fail fast.
 				return new NextAction<MPaxPayload>(Action.FINISHED, null);
@@ -241,21 +215,7 @@ public class PaxosServer {
 		List<ByteBuffer> encodedAccept(byte[] eg, WALEntry entry, long walIndex) {
 			logger.debug("Making encoded accept with walEntry: " + entry);
 			MsgAccept msgAccept = new MsgAccept(entry, walIndex, eg);
-			AvroAccept avroAccept = msgAccept.toAvro();
-			// TODO share/reuse/pool these objects, GC pressure
-			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-			bbos.write(MsgAccept.MSG_ID);
-			final DatumWriter<AvroAccept> writer = 
-				new SpecificDatumWriter<AvroAccept>(AvroAccept.class);
-			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
-			try {
-				writer.write(avroAccept, enc);
-				enc.flush();
-			} catch (IOException e) {
-				throw new AssertionError(e);  // Can't happen
-			}
-			List<ByteBuffer> bbList = bbos.getBufferList();
-			return bbList;
+			return RPCUtil.rpcBbEncode(msgAccept);
 		}
 
 		public int getNumConcurrent() {
@@ -336,7 +296,7 @@ public class PaxosServer {
 				List<ByteBuffer> chosenBufs = encodedChosenMsg(payload.eg, 
 						payload.walIndex);
 				logger.debug("Sending chosen msg to remote replicas");
-				sendToRemoteReplicas(replicas, chosenBufs, null);
+				RPCUtil.sendToRemoteReplSvrs(megalon, replicas, chosenBufs, null);
 			} else {
 				logger.debug("Accept-response quorum failed");
 				if(payload.commitTries < MAX_COMMIT_TRIES) {
@@ -386,16 +346,8 @@ public class PaxosServer {
 
 		List<ByteBuffer> encodedChosenMsg(byte[] entityGroup, long walIndex) 
 		throws IOException {
-			ByteBufferOutputStream bbos = new ByteBufferOutputStream();
-			bbos.write(MsgChosen.MSG_ID);
-			final DatumWriter<AvroChosen> writer = 
-				new SpecificDatumWriter<AvroChosen>(AvroChosen.class);
-			Encoder enc = EncoderFactory.get().binaryEncoder(bbos, null);
-			AvroChosen chosenMsg = new MsgChosen(entityGroup, walIndex).toAvro();
-			writer.write(chosenMsg, enc);
-			enc.flush();
-			bbos.flush();
-			return bbos.getBufferList();
+			MsgChosen msg = new MsgChosen(entityGroup, walIndex);
+			return RPCUtil.rpcBbEncode(msg);
 		}
 		
 		public void setServer(MultiStageServer<MPaxPayload> server) {}
@@ -443,38 +395,5 @@ public class PaxosServer {
 			this.committed = payload.committed;
 			done = true;
 		}
-	}
-	
-	/**
-	 * Send the given list of ByteBuffers to all replicas. Returns the
-	 * number of replicas for which we don't have an open socket, which
-	 * are failures. Other (reachable) replicas may still fail later.
-	 */
-	int sendToRemoteReplicas(Collection<ReplicaDesc> replicas, 
-			List<ByteBuffer> outBytes, MPaxPayload payload) {
-		int numFailedReplicas = 0;
-		List<ByteBuffer> outBytesThisRepl;
-		for(ReplicaDesc replicaDesc: replicas) {
-			if(replicaDesc == megalon.config.myReplica) {
-				// We assume the local replica was handled elsewhere.
-				continue;
-			}
-			boolean aHostSucceeded = false;
-			for(Host host: (List<Host>)Util.shuffled(replicaDesc.replsrv)) {
-				outBytesThisRepl = RPCUtil.duplicateBufferList(outBytes);
-				//logger.debug("bytes this repl: " + RPCUtil.strBufs(outBytesThisRepl));
-				RPCClient rpcCli = megalon.clientData.getReplSrvSocket(host);
-				aHostSucceeded |= rpcCli.write(outBytesThisRepl, payload);
-				if(!aHostSucceeded) {
-					logger.debug("Host write failed: " + host);
-				}
-				break;
-			}
-			if(!aHostSucceeded) {
-				numFailedReplicas++;
-				logger.debug("All hosts for replica failed: " + replicaDesc);
-			}
-		}
-		return numFailedReplicas;
 	}
 }
