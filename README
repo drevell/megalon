@@ -1,3 +1,7 @@
+I've abandoned this project indefinitely because it's going to take much more time than I have. The existing work is dubious also, there were some questionable implementation decisions due to noobishness. -Dave
+
+======================
+
 Megalon is intended to be an approximate clone of Google's Megastore database 
 for geographically-distributed scalable fault-tolerant consistent data storage.
 
